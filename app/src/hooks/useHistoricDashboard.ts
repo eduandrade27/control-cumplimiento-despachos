@@ -3,6 +3,7 @@ import {
   buildLineKey,
   buildPedidoKey,
   getDateKey,
+  hasGuideInformation,
   normalizeText,
   readNumericValue,
   readProgrammedTm,
@@ -285,18 +286,6 @@ function buildPeriodKey(dateKey: string, granularity: HistoricGranularity): stri
   return granularity === 'day' ? dateKey : dateKey.slice(0, 7)
 }
 
-function hasEvaluatedGuia(row: DashboardRow): boolean {
-  return readNumericField(row, [
-    'cant_despachada',
-    'cant despachada',
-    'guia',
-    'guia despacho',
-    'guia_cantidad',
-    'cantidad_guiada',
-    'cant_guiada',
-  ]) !== null
-}
-
 function readStatus(row: DashboardRow): string {
   return normalizeText(readTextField(row, [
     'status_despacho',
@@ -474,7 +463,7 @@ function buildPedidoSummaries(
     current.programmedTm += readProgrammedTm(row)
     current.pendingTm += readPendingTmHistoric(row)
 
-    if (hasEvaluatedGuia(row)) {
+    if (hasGuideInformation(row)) {
       const lineDispatchedTm = readDispatchedTmHistoric(row)
       const fulfilledLine = isFulfilledStatus(row)
       const unfulfilledLine = isUnfulfilledStatus(row) || !fulfilledLine
@@ -591,10 +580,10 @@ function summarizeRows(
 
     tmByPedido.set(key, {
       programmed: readProgrammedTm(row),
-      dispatched: hasEvaluatedGuia(row) ? readDispatchedTmHistoric(row) : 0,
+      dispatched: hasGuideInformation(row) ? readDispatchedTmHistoric(row) : 0,
     })
 
-    if (!hasEvaluatedGuia(row)) {
+    if (!hasGuideInformation(row)) {
       return
     }
 
@@ -683,15 +672,17 @@ function summarizeRows(
 
   const complianceOrdersPct = complianceEvaluatedOrders > 0
     ? (complianceFulfilledOrders / complianceEvaluatedOrders) * 100
-    : (mode === 'AJUSTADO' ? null : 0)
+    : null
   const complianceTmPct = complianceProgrammedTm > 0
     ? (Math.min(complianceProgrammedTm, complianceDispatchedTm) / complianceProgrammedTm) * 100
-    : (mode === 'AJUSTADO' ? null : 0)
+    : null
+  const fulfilledOrdersValue = complianceEvaluatedOrders > 0 ? fulfilledOrders : null
+  const unfulfilledOrdersValue = complianceEvaluatedOrders > 0 ? unfulfilledOrders : null
 
   return {
     programmedOrders,
-    fulfilledOrders,
-    unfulfilledOrders,
+    fulfilledOrders: fulfilledOrdersValue,
+    unfulfilledOrders: unfulfilledOrdersValue,
     pendingEvaluationOrders,
     complianceOrdersPct,
     complianceTmPct,
@@ -1080,10 +1071,10 @@ export function useHistoricDashboard() {
     [causeCatalogMap, effectiveIndicatorMode, granularity, previousComplianceByPeriod, rowsByContextFilters],
   )
 
-  const comparisonRowsForCharts = useMemo(() => {
-    const chartRows = rowsByContextFilters.filter((row) => hasEvaluatedGuia(row))
-    return buildPeriodRows(chartRows, granularity, effectiveIndicatorMode, causeCatalogMap, previousComplianceByPeriod)
-  }, [causeCatalogMap, effectiveIndicatorMode, granularity, previousComplianceByPeriod, rowsByContextFilters])
+  const comparisonRowsForCharts = useMemo(
+    () => buildPeriodRows(rowsByContextFilters, granularity, effectiveIndicatorMode, causeCatalogMap, previousComplianceByPeriod),
+    [causeCatalogMap, effectiveIndicatorMode, granularity, previousComplianceByPeriod, rowsByContextFilters],
+  )
 
   const totalSummary = useMemo(
     () => summarizeRows(rowsByContextFilters, effectiveIndicatorMode, causeCatalogMap),

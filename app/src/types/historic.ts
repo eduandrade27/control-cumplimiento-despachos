@@ -12,8 +12,8 @@ export interface HistoricPeriodMetrics {
   periodKey: string
   periodLabel: string
   programmedOrders: number
-  fulfilledOrders: number
-  unfulfilledOrders: number
+  fulfilledOrders: number | null
+  unfulfilledOrders: number | null
   pendingEvaluationOrders: number
   complianceOrdersPct: number | null
   complianceTmPct: number | null

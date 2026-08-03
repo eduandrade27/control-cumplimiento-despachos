@@ -1,4 +1,4 @@
-import { aggregatePedidos, buildPedidoKey, filterRowsBySelectedMonths, getDateKey, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readClientName, readCauseName, readPendingTm, toNumber } from '../lib/operationalDetail'
+import { aggregatePedidos, buildPedidoKey, filterRowsBySelectedMonths, getDateKey, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readClientName, readCauseName, readPendingTm } from '../lib/operationalDetail'
 import { fetchOperationalBaseData } from './operationalDataCache'
 import type { OperationalInsightCrossFilter, OperationalInsightRow, OperationalInsightsData, OperationalInsightSeriesPoint, OperationalTopRow } from '../types/operationalInsights'
 
@@ -190,7 +190,7 @@ function buildTopCauseRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
     const pedidoKey = buildPedidoKey(row)
     const normalizedCause = causeName.toLowerCase()
 
-    if (pedidoKey) {
+    if (pedidoKey && isIncumplidoRow(row)) {
       entry.pedidos.add(`${pedidoKey}|${normalizedCause}`)
     }
 
@@ -222,7 +222,7 @@ function buildAreaSeries(rows: OperationalInsightRow[], mode: 'incidents' | 'pen
     const pedidoKey = buildPedidoKey(row)
     const normalizedArea = area.toLowerCase()
 
-    if (pedidoKey && (toNumber(row.pedidos_incumplidos) ?? 0) > 0) {
+    if (pedidoKey && isIncumplidoRow(row)) {
       current.pedidos.add(`${pedidoKey}|${normalizedArea}`)
     }
 

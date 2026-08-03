@@ -4,6 +4,7 @@ import { KpiCard } from '../components/operational/KpiCard'
 import { OperationalCharts } from '../components/operational/OperationalCharts'
 import { useOperationalDashboard } from '../hooks/useOperationalDashboard'
 import { useOperationalInsights } from '../hooks/useOperationalInsights'
+import { formatNumber, formatPercent } from '../lib/operationalFormat'
 
 function normalizeSearchText(value: string): string {
   return value
@@ -11,36 +12,6 @@ function normalizeSearchText(value: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-}
-
-function formatNumber(value: number | null, digits = 0): string {
-  if (value === null || Number.isNaN(value)) {
-    return '—'
-  }
-
-  return new Intl.NumberFormat('es-CL', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value)
-}
-
-function formatDecimal(value: number | null, digits = 2): string {
-  if (value === null || Number.isNaN(value)) {
-    return '—'
-  }
-
-  return new Intl.NumberFormat('es-CL', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value)
-}
-
-function formatPercent(value: number | null): string {
-  if (value === null || Number.isNaN(value)) {
-    return '—'
-  }
-
-  return `${value.toFixed(1)}%`
 }
 
 function getComplianceTone(value: number | null): 'success' | 'warning' | 'danger' | 'default' {
@@ -135,19 +106,19 @@ export function OperationalPage() {
     {
       key: 'tmProgramadas',
       title: 'TM programadas',
-      value: formatDecimal(kpis.tmProgramadas),
+      value: formatNumber(kpis.tmProgramadas, 2),
       hint: 'Toneladas programadas para el período seleccionado.',
     },
     {
       key: 'tmDespachadas',
       title: 'TM despachadas',
-      value: formatDecimal(kpis.tmDespachadas),
+      value: formatNumber(kpis.tmDespachadas, 2),
       hint: 'Toneladas efectivamente despachadas.',
     },
     {
       key: 'tmPendientes',
       title: 'TM pendientes',
-      value: formatDecimal(kpis.tmPendientes),
+      value: formatNumber(kpis.tmPendientes, 2),
       hint: 'Toneladas aún por despachar.',
     },
     {
@@ -177,7 +148,7 @@ export function OperationalPage() {
     {
       key: 'promedioDiario',
       title: 'Promedio diario de TM programadas',
-      value: formatDecimal(kpis.promedioDiarioTmProgramadas),
+      value: formatNumber(kpis.promedioDiarioTmProgramadas, 2),
       hint: 'Promedio diario de toneladas programadas.',
     },
   ], [kpis])

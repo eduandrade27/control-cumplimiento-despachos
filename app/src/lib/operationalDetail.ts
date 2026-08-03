@@ -165,6 +165,28 @@ export function readPendingTm(row: OperationalDetailRow): number {
   return readNumericValue(row, candidates) ?? 0
 }
 
+export function hasGuideInformation(row: OperationalDetailRow): boolean {
+  const candidates = [
+    'guia',
+    'guía',
+    'guia',
+    'cant_despachada',
+    'cant despachada',
+    'guia_despacho',
+    'guia despacho',
+    'cantidad_guiada',
+    'cant_guiada',
+  ]
+
+  return readTextValue(row, candidates) !== null
+}
+
+export type PedidoEvaluationStatus = 'FULFILLED' | 'UNFULFILLED' | 'PENDING_EVALUATION'
+
+export function getPedidoEvaluationStatus(row: OperationalDetailRow): PedidoEvaluationStatus {
+  return isIncumplidoRow(row) ? 'UNFULFILLED' : 'FULFILLED'
+}
+
 export function isBlankOrValue(value: unknown, invalidValue: string): boolean {
   const normalized = normalizeText(value)
   return !normalized || normalized === normalizeText(invalidValue)
@@ -243,6 +265,11 @@ export interface AggregatedPedido {
   dispatchedTm: number
   pendingTm: number
   isIncumplido: boolean
+  hasGuideInformation: boolean
+  evaluationStatus: PedidoEvaluationStatus
+  evaluableProgrammedTm: number
+  evaluableDispatchedTm: number
+  evaluablePendingTm: number
 }
 
 export function aggregatePedidos(rows: OperationalDetailRow[]): AggregatedPedido[] {
@@ -263,6 +290,11 @@ export function aggregatePedidos(rows: OperationalDetailRow[]): AggregatedPedido
       dispatchedTm: 0,
       pendingTm: 0,
       isIncumplido: false,
+      hasGuideInformation: false,
+      evaluationStatus: 'FULFILLED' as PedidoEvaluationStatus,
+      evaluableProgrammedTm: 0,
+      evaluableDispatchedTm: 0,
+      evaluablePendingTm: 0,
       seenLineKeys: new Set<string>(),
     }
 
@@ -273,11 +305,21 @@ export function aggregatePedidos(rows: OperationalDetailRow[]): AggregatedPedido
       current.pendingTm += readPendingTm(row)
     }
 
+    const guideInformation = hasGuideInformation(row)
+    current.hasGuideInformation = current.hasGuideInformation || guideInformation
+    current.evaluableProgrammedTm += readProgrammedTm(row)
+    current.evaluableDispatchedTm += readDispatchedTm(row)
+    current.evaluablePendingTm += readPendingTm(row)
     current.isIncumplido = current.isIncumplido || isIncumplidoRow(row)
+    current.evaluationStatus = current.isIncumplido ? 'UNFULFILLED' : 'FULFILLED'
+
     current.client = current.client ?? readClientName(row)
     current.dateKey = current.dateKey ?? getDateKey(readTextValue(row, ['fecha', 'fecha_programacion', 'fecha_pedido']))
     map.set(pedidoKey, current)
   }
 
-  return Array.from(map.values()).map(({ seenLineKeys: _seenLineKeys, ...pedido }) => pedido)
+  return Array.from(map.values()).map(({ seenLineKeys: _seenLineKeys, ...pedido }) => ({
+    ...pedido,
+    evaluationStatus: pedido.isIncumplido ? 'UNFULFILLED' : 'FULFILLED',
+  }))
 }

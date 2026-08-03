@@ -3,7 +3,7 @@ export function formatTm(value: number | null, digits = 2): string {
     return '—'
   }
 
-  return new Intl.NumberFormat('es-CL', {
+  return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value)
@@ -14,7 +14,7 @@ export function formatNumber(value: number | null, digits = 0): string {
     return '—'
   }
 
-  return new Intl.NumberFormat('es-CL', {
+  return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value)

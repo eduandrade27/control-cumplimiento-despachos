@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState } from 'react'
 import { GlobalMonthFilter, GlobalYearFilter } from '../components/GlobalPeriodFilters'
 import { KpiCard } from '../components/operational/KpiCard'
 import { useCommercialDashboard } from '../hooks/useCommercialDashboard'
+import { formatNumber } from '../lib/operationalFormat'
 
 function normalizeSearchText(value: string): string {
   return value
@@ -9,28 +10,6 @@ function normalizeSearchText(value: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-}
-
-function formatNumber(value: number | null, digits = 0): string {
-  if (value === null || Number.isNaN(value)) {
-    return '—'
-  }
-
-  return new Intl.NumberFormat('es-CL', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value)
-}
-
-function formatDecimal(value: number | null, digits = 2): string {
-  if (value === null || Number.isNaN(value)) {
-    return '—'
-  }
-
-  return new Intl.NumberFormat('es-CL', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value)
 }
 
 export function CommercialPage() {
@@ -123,7 +102,7 @@ export function CommercialPage() {
     {
       key: 'tmPendientes',
       title: 'TM PENDIENTES',
-      value: formatDecimal(kpis.tmPendientes),
+      value: formatNumber(kpis.tmPendientes, 2),
       hint: 'Toneladas pendientes del período filtrado.',
     },
     {
@@ -322,7 +301,7 @@ export function CommercialPage() {
                     {visibleCauseRows.map((row) => (
                       <tr key={row.causa}>
                         <td className="commercial-page__table-cell-left">{row.causa}</td>
-                        <td className="commercial-page__table-cell-center">{formatDecimal(row.tmPendiente)}</td>
+                        <td className="commercial-page__table-cell-center">{formatNumber(row.tmPendiente, 2)}</td>
                         <td className="commercial-page__table-cell-center">{formatNumber(row.pedidosIncumplidos)}</td>
                       </tr>
                     ))}
@@ -385,7 +364,7 @@ export function CommercialPage() {
                               <span className="commercial-page__table-cell-main">{row.cliente}</span>
                             </td>
                             <td className="commercial-page__table-cell-left"><span className="commercial-page__table-cell-main">{row.vendedor}</span></td>
-                            <td className="commercial-page__table-cell-center">{formatDecimal(row.tmPendiente)}</td>
+                            <td className="commercial-page__table-cell-center">{formatNumber(row.tmPendiente, 2)}</td>
                           </tr>
                           {isExpanded && (
                             <tr className="commercial-page__detail-expand-row">
@@ -408,7 +387,7 @@ export function CommercialPage() {
                                       {row.causes.map((cause) => (
                                         <tr key={`${row.key}-${cause.causa}`}>
                                           <td className="commercial-page__table-cell-left commercial-page__expand-cell">{cause.causa}</td>
-                                          <td className="commercial-page__table-cell-center commercial-page__expand-cell">{formatDecimal(cause.tmPendiente)}</td>
+                                          <td className="commercial-page__table-cell-center commercial-page__expand-cell">{formatNumber(cause.tmPendiente, 2)}</td>
                                           <td className="commercial-page__table-cell-center commercial-page__expand-cell">{formatNumber(cause.pedidosIncumplidos)}</td>
                                         </tr>
                                       ))}

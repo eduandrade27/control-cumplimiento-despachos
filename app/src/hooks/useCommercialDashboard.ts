@@ -157,14 +157,14 @@ function buildPedidoKeysByArea(rows: Record<string, unknown>[]): Map<string, Set
 }
 
 function buildCommercialKpis(rows: Record<string, unknown>[]): CommercialKpis {
-  const tmPendientes = rows.reduce((accumulator, row) => accumulator + (Number(readPendingTm(row)) || 0), 0)
+  const tmPendientes = rows.reduce((accumulator, row) => accumulator + (readPendingTm(row) || 0), 0)
   const pedidosIncumplidos = new Set<string>()
   const clientesAfectados = new Set<string>()
   const vendedoresInvolucrados = new Set<string>()
 
   for (const row of rows) {
     const pedidoKey = buildPedidoKey(row)
-    if (pedidoKey) {
+    if (pedidoKey && isIncumplidoRow(row)) {
       pedidosIncumplidos.add(pedidoKey)
     }
 
@@ -436,21 +436,11 @@ export function useCommercialDashboard(selectedClients: string[], selectedArea: 
     })
   }, [filteredCauseRows, pedidoKeysByArea, selectedArea])
 
-  const incumplidoDetailRows = useMemo(
-    () => areaFilteredDetailRows.filter((row) => isIncumplidoRow(row)),
-    [areaFilteredDetailRows],
-  )
-
-  const incumplidoCauseRows = useMemo(
-    () => areaFilteredCauseRows.filter((row) => isIncumplidoRow(row)),
-    [areaFilteredCauseRows],
-  )
-
-  const kpis = useMemo(() => buildCommercialKpis(incumplidoDetailRows), [incumplidoDetailRows])
-  const causeTableRows = useMemo(() => buildCauseRows(incumplidoCauseRows), [incumplidoCauseRows])
+  const kpis = useMemo(() => buildCommercialKpis(areaFilteredDetailRows), [areaFilteredDetailRows])
+  const causeTableRows = useMemo(() => buildCauseRows(areaFilteredCauseRows), [areaFilteredCauseRows])
   const commercialDetailRows = useMemo(
-    () => buildDetailRows(incumplidoDetailRows, incumplidoCauseRows),
-    [incumplidoCauseRows, incumplidoDetailRows],
+    () => buildDetailRows(areaFilteredDetailRows, areaFilteredCauseRows),
+    [areaFilteredCauseRows, areaFilteredDetailRows],
   )
   const availableClients = useMemo(() => buildAvailableClients(detailRows), [detailRows])
   const availableAreas = useMemo(() => buildAvailableAreas(areaRows), [areaRows])

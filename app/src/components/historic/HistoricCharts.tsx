@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Tooltip } from '../Tooltip'
+import { formatNumber, formatPercent } from '../../lib/operationalFormat'
 import type { HistoricComparisonRow, HistoricEvolutionMetric } from '../../types/historic'
 
 interface HistoricChartsProps {
@@ -29,17 +30,6 @@ interface GroupedBarChartProps {
   firstClassName: string
   secondClassName: string
   thirdClassName: string
-}
-
-function formatNumber(value: number, digits = 0): string {
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(Number.isFinite(value) ? value : 0)
-}
-
-function formatPercent(value: number): string {
-  return `${value.toFixed(1)}%`
 }
 
 function asChartPercent(value: number | null, yMax: number): number {
@@ -96,6 +86,10 @@ function ComplianceLineChart({
   onSelectPeriod,
   yMax,
 }: ComplianceLineChartProps) {
+  if (!rows.some((row) => row.complianceOrdersPct !== null || row.complianceTmPct !== null)) {
+    return <div className="operational-insights__empty">Sin información evaluable.</div>
+  }
+
   const width = 820
   const height = 250
   const padding = { top: 16, right: 16, bottom: 44, left: 48 }
@@ -205,6 +199,10 @@ function GroupedBarChart({
   secondClassName,
   thirdClassName,
 }: GroupedBarChartProps) {
+  if (unit === 'pedidos' && !rows.some((row) => row.fulfilledOrders !== null || row.unfulfilledOrders !== null)) {
+    return <div className="operational-insights__empty">Sin información evaluable.</div>
+  }
+
   const width = 820
   const height = 250
   const padding = { top: 16, right: 16, bottom: 44, left: 48 }

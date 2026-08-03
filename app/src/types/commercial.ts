@@ -1,8 +1,8 @@
 import type { AvailableMonthOption } from './operational'
 
 export interface CommercialKpis {
-  tmPendientes: number
-  pedidosIncumplidos: number
+  tmPendientes: number | null
+  pedidosIncumplidos: number | null
   clientesAfectados: number
   vendedoresInvolucrados: number
 }

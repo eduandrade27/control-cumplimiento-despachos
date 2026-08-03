@@ -2,30 +2,8 @@ import { useState } from 'react'
 import { Tooltip } from '../components/Tooltip'
 import { HistoricCharts } from '../components/historic/HistoricCharts'
 import { useHistoricDashboard } from '../hooks/useHistoricDashboard'
+import { formatNumber, formatPercent } from '../lib/operationalFormat'
 import type { HistoricKpiCard } from '../types/historic'
-
-function formatValue(value: number | null, digits = 2): string {
-  if (value === null || Number.isNaN(value)) {
-    return '—'
-  }
-
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(value)
-}
-
-function formatInteger(value: number | null): string {
-  return formatValue(value, 0)
-}
-
-function formatPercent(value: number | null, digits = 1): string {
-  if (value === null || Number.isNaN(value)) {
-    return '—'
-  }
-
-  return `${value.toFixed(digits)}%`
-}
 
 function formatCardValue(card: HistoricKpiCard): string {
   if (card.unit === 'percent') {
@@ -33,10 +11,10 @@ function formatCardValue(card: HistoricKpiCard): string {
   }
 
   if (card.unit === 'tm') {
-    return `${formatValue(card.mainValue)} TM`
+    return `${formatNumber(card.mainValue, 2)} TM`
   }
 
-  return formatInteger(card.mainValue)
+  return formatNumber(card.mainValue)
 }
 
 function variationTone(value: number | null): 'positive' | 'negative' | 'neutral' {
@@ -334,12 +312,12 @@ export function HistoricPage() {
                       return (
                         <tr key={row.periodKey} className={isHighlighted ? 'historic-page__row-highlighted' : ''}>
                           <td className="historic-page__period-cell">{row.periodLabel}</td>
-                          <td className="historic-page__numeric-cell">{formatInteger(row.programmedOrders)}</td>
-                          <td className="historic-page__numeric-cell">{formatInteger(row.fulfilledOrders)}</td>
-                          <td className="historic-page__numeric-cell">{formatInteger(row.unfulfilledOrders)}</td>
-                          <td className="historic-page__numeric-cell">{formatValue(row.tmProgramadas)}</td>
-                          <td className="historic-page__numeric-cell">{formatValue(row.tmDespachadas)}</td>
-                          <td className="historic-page__numeric-cell">{formatValue(row.tmPendientes)}</td>
+                          <td className="historic-page__numeric-cell">{formatNumber(row.programmedOrders)}</td>
+                          <td className="historic-page__numeric-cell">{formatNumber(row.fulfilledOrders)}</td>
+                          <td className="historic-page__numeric-cell">{formatNumber(row.unfulfilledOrders)}</td>
+                          <td className="historic-page__numeric-cell">{formatNumber(row.tmProgramadas, 2)}</td>
+                          <td className="historic-page__numeric-cell">{formatNumber(row.tmDespachadas, 2)}</td>
+                          <td className="historic-page__numeric-cell">{formatNumber(row.tmPendientes, 2)}</td>
                           <td className="historic-page__numeric-cell">
                             <span className="historic-page__compliance-cell">
                               {formatPercent(row.complianceOrdersPct)}
@@ -357,7 +335,7 @@ export function HistoricPage() {
                             </span>
                           </td>
                           <td className={`historic-page__numeric-cell historic-page__variation historic-page__variation--${tone}`}>
-                            {row.variationVsPreviousPp === null ? '—' : `${row.variationVsPreviousPp > 0 ? '+' : ''}${formatValue(row.variationVsPreviousPp, 1)} pp`}
+                            {row.variationVsPreviousPp === null ? '—' : `${row.variationVsPreviousPp > 0 ? '+' : ''}${formatNumber(row.variationVsPreviousPp, 1)} pp`}
                           </td>
                         </tr>
                       )
@@ -419,17 +397,17 @@ export function HistoricPage() {
                             </>
                           ) : (
                             <>
-                              <td className="historic-page__numeric-cell">{formatValue(row.totalValue)}</td>
-                              <td className="historic-page__numeric-cell">{formatValue(row.agroValue)}</td>
+                              <td className="historic-page__numeric-cell">{formatNumber(row.totalValue, 2)}</td>
+                              <td className="historic-page__numeric-cell">{formatNumber(row.agroValue, 2)}</td>
                               <td className="historic-page__numeric-cell">{row.agroPartPct === null ? '—' : formatPercent(row.agroPartPct)}</td>
-                              <td className="historic-page__numeric-cell">{formatValue(row.domesticoValue)}</td>
+                              <td className="historic-page__numeric-cell">{formatNumber(row.domesticoValue, 2)}</td>
                               <td className="historic-page__numeric-cell">{row.domesticoPartPct === null ? '—' : formatPercent(row.domesticoPartPct)}</td>
                             </>
                           )
                         ) : (
                           <td className="historic-page__numeric-cell">{selectedSector === 'AGRO'
-                            ? (row.label === '% CUMPLIMIENTO' ? formatPercent(row.agroValue) : formatValue(row.agroValue))
-                            : (row.label === '% CUMPLIMIENTO' ? formatPercent(row.domesticoValue) : formatValue(row.domesticoValue))}</td>
+                            ? (row.label === '% CUMPLIMIENTO' ? formatPercent(row.agroValue) : formatNumber(row.agroValue, 2))
+                            : (row.label === '% CUMPLIMIENTO' ? formatPercent(row.domesticoValue) : formatNumber(row.domesticoValue, 2))}</td>
                         )}
                       </tr>
                     ))}
