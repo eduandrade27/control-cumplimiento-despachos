@@ -14,7 +14,7 @@ import { loadCauseCatalogSummary, normalizeCauseComparisonToken } from '../lib/e
 import { subscribeToSupabaseRefresh } from '../lib/refreshEvents'
 import { formatMonthLabel } from '../lib/operationalFormat'
 import { fetchOperationalBaseData } from '../services/operationalDataCache'
-import { fetchAllRowsFromView } from '../services/supabasePagination'
+import { fetchHistoricDashboardRows } from '../services/historicService'
 import type { SupabaseErrorInfo } from '../types/operational'
 import type {
   HistoricComparisonRow,
@@ -798,11 +798,7 @@ export function useHistoricDashboard() {
 
     try {
       const baseData = await fetchOperationalBaseData()
-      const lineasDespachoRows = await fetchAllRowsFromView<DashboardRow>(
-        'lineas_despacho',
-        1000,
-        'fecha,orden_venta,cod_parte,cliente,sector,cant_despachada,status_despacho,tm_programada,tm_despachada,tm_pendiente,causa',
-      )
+      const lineasDespachoRows = await fetchHistoricDashboardRows()
       const rowsWithDate = lineasDespachoRows.filter((row) => {
         const dateKey = getDateKey(readTextValue(row, ['fecha', 'fecha_programacion', 'fecha_pedido']))
         return Boolean(dateKey)

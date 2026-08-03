@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { Tooltip } from '../Tooltip'
 import { formatNumber, formatPercent } from '../../lib/operationalFormat'
 import type { HistoricComparisonRow, HistoricEvolutionMetric } from '../../types/historic'
@@ -291,7 +291,7 @@ function Legend({ items }: { items: Array<{ label: string; className: string }> 
   )
 }
 
-export function HistoricCharts({ rows, highlightedPeriodKey, onSelectPeriod }: HistoricChartsProps) {
+export const HistoricCharts = memo(function HistoricCharts({ rows, highlightedPeriodKey, onSelectPeriod }: HistoricChartsProps) {
   const [evolutionMetric, setEvolutionMetric] = useState<HistoricEvolutionMetric>('TM')
 
   if (rows.length === 0) {
@@ -413,4 +413,4 @@ export function HistoricCharts({ rows, highlightedPeriodKey, onSelectPeriod }: H
       </ChartCard>
     </div>
   )
-}
+})

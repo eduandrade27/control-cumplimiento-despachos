@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react'
 import { dispatchSupabaseRefresh } from '../lib/refreshEvents'
 import { CAUSE_CATALOG_STORAGE_KEY, loadCauseCatalogSummary, saveCauseCatalogSummary } from '../lib/excel'
+import { invalidateCommercialDashboardCache } from '../services/commercialService'
+import { invalidateHistoricDashboardCache } from '../services/historicService'
 import { invalidateOperationalBaseDataCache } from '../services/operationalDataCache'
 import { clearSupabaseRowsCache } from '../services/supabasePagination'
 import { uploadExcelToSupabase, type ExcelLoadProgress, type ExcelLoadResult } from '../services/excelLoadService'
@@ -80,6 +82,8 @@ export function useExcelImportLoad(): UseExcelImportLoadResult {
         saveCauseCatalogSummary(metadata.causeCatalogSummary)
         clearSupabaseRowsCache()
         invalidateOperationalBaseDataCache()
+        invalidateCommercialDashboardCache()
+        invalidateHistoricDashboardCache()
         const persistedCompleteRulesCount = metadata.causeCatalogSummary.rows.filter((row) => {
           return row.motivoOriginal.trim().length > 0 && row.motivoNormalizado.trim().length > 0
         }).length

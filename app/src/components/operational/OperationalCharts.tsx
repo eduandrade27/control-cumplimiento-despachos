@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { formatNumber, formatPercent, formatTm } from '../../lib/operationalFormat'
 import type { OperationalInsightSeriesPoint, OperationalTopRow } from '../../types/operationalInsights'
 import { Tooltip } from '../Tooltip'
@@ -223,7 +224,7 @@ function GroupedTmBarChart({ data }: { data: OperationalInsightSeriesPoint[] }) 
   )
 }
 
-export function OperationalCharts({
+export const OperationalCharts = memo(function OperationalCharts({
   temporalSeries,
   incumplimientosSeries,
   volumeSeries,
@@ -311,4 +312,4 @@ export function OperationalCharts({
       </div>
     </div>
   )
-}
+})

@@ -3,6 +3,12 @@ import { fetchAllRowsFromView } from './supabasePagination'
 import type { AvailableMonthOption, SupabaseErrorInfo } from '../types/operational'
 import type { CommercialDashboardData } from '../types/commercial'
 
+let commercialDashboardDataPromise: Promise<CommercialDashboardData> | null = null
+
+export function invalidateCommercialDashboardCache(): void {
+  commercialDashboardDataPromise = null
+}
+
 function toSupabaseError(error: unknown): SupabaseErrorInfo {
   if (typeof error === 'object' && error !== null) {
     const candidate = error as Record<string, unknown>
@@ -166,24 +172,33 @@ function buildAvailableMonthOptions(baseRows: Record<string, unknown>[], availab
 }
 
 export async function fetchCommercialDashboardData(): Promise<CommercialDashboardData> {
-  try {
-    const [detailRows, causeRows, areaRows, yearsQuery] = await Promise.all([
-      fetchAllRowsFromView<Record<string, unknown>>('vw_pedidos'),
-      fetchAllRowsFromView<Record<string, unknown>>('vw_pedido_causa'),
-      fetchAllRowsFromView<Record<string, unknown>>('vw_pedido_area'),
-      supabase.schema('despachos').from('vw_anios_disponibles').select('*'),
-    ])
-    if (yearsQuery.error) {
-      throw toSupabaseError(yearsQuery.error)
-    }
-
-    return {
-      detailRows,
-      causeRows,
-      areaRows,
-      availableMonths: buildAvailableMonthOptions([...detailRows, ...causeRows, ...areaRows], (yearsQuery.data ?? []) as Record<string, unknown>[]),
-    }
-  } catch (error) {
-    throw toSupabaseError(error)
+  if (commercialDashboardDataPromise) {
+    return commercialDashboardDataPromise
   }
+
+  commercialDashboardDataPromise = (async () => {
+    try {
+      const [detailRows, causeRows, areaRows, yearsQuery] = await Promise.all([
+        fetchAllRowsFromView<Record<string, unknown>>('vw_pedidos'),
+        fetchAllRowsFromView<Record<string, unknown>>('vw_pedido_causa'),
+        fetchAllRowsFromView<Record<string, unknown>>('vw_pedido_area'),
+        supabase.schema('despachos').from('vw_anios_disponibles').select('*'),
+      ])
+      if (yearsQuery.error) {
+        throw toSupabaseError(yearsQuery.error)
+      }
+
+      return {
+        detailRows,
+        causeRows,
+        areaRows,
+        availableMonths: buildAvailableMonthOptions([...detailRows, ...causeRows, ...areaRows], (yearsQuery.data ?? []) as Record<string, unknown>[]),
+      }
+    } catch (error) {
+      commercialDashboardDataPromise = null
+      throw toSupabaseError(error)
+    }
+  })()
+
+  return commercialDashboardDataPromise
 }
