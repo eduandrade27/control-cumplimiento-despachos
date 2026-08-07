@@ -8,13 +8,19 @@ create table if not exists despachos.catalogo_causas_compartido (
 
 alter table despachos.catalogo_causas_compartido enable row level security;
 
-create policy if not exists catalogo_causas_compartido_select_authenticated
+drop policy if exists catalogo_causas_compartido_select_authenticated
+on despachos.catalogo_causas_compartido;
+
+create policy catalogo_causas_compartido_select_authenticated
 on despachos.catalogo_causas_compartido
 for select
 to authenticated
 using (true);
 
-create policy if not exists catalogo_causas_compartido_write_admin
+drop policy if exists catalogo_causas_compartido_write_admin
+on despachos.catalogo_causas_compartido;
+
+create policy catalogo_causas_compartido_write_admin
 on despachos.catalogo_causas_compartido
 for all
 to authenticated

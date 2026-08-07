@@ -54,6 +54,8 @@ export interface CausesAdjustedModeInfo {
 export interface CausesAnalysisSummary {
   pedidosIncumplidos: number
   tmPendientes: number
+  tmPendientesTotales: number
+  impactoTotalTm: number
   availableMonths: AvailableMonthOption[]
   availableYears: number[]
   selectedYear: number | null

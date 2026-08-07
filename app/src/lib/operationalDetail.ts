@@ -166,19 +166,22 @@ export function readPendingTm(row: OperationalDetailRow): number {
 }
 
 export function hasGuideInformation(row: OperationalDetailRow): boolean {
-  const candidates = [
-    'guia',
-    'guía',
-    'guia',
-    'cant_despachada',
-    'cant despachada',
-    'guia_despacho',
-    'guia despacho',
-    'cantidad_guiada',
-    'cant_guiada',
-  ]
+  const value = getValue(row, ['has_guia'])
 
-  return readTextValue(row, candidates) !== null
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0
+  }
+
+  if (typeof value === 'string') {
+    const normalized = normalizeText(value)
+    return normalized === 'true' || normalized === 't' || normalized === '1'
+  }
+
+  return false
 }
 
 export type PedidoEvaluationStatus = 'FULFILLED' | 'UNFULFILLED' | 'PENDING_EVALUATION'

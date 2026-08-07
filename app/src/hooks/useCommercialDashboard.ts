@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { buildPedidoKey, filterRowsBySelectedMonths, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readAreaName, readCauseName, readClientName, readPendingTm, readTextValue } from '../lib/operationalDetail'
+import { buildPedidoKey, filterRowsBySelectedMonths, hasGuideInformation, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readAreaName, readCauseName, readClientName, readPendingTm, readTextValue } from '../lib/operationalDetail'
 import { fetchCommercialDashboardData } from '../services/commercialService'
 import type { CommercialCauseRow, CommercialDetailCauseRow, CommercialDetailRow, CommercialKpis } from '../types/commercial'
 import type { AvailableMonthOption, SupabaseErrorInfo } from '../types/operational'
@@ -164,7 +164,7 @@ function buildCommercialKpis(rows: Record<string, unknown>[]): CommercialKpis {
 
   for (const row of rows) {
     const pedidoKey = buildPedidoKey(row)
-    if (pedidoKey && isIncumplidoRow(row)) {
+    if (pedidoKey && hasGuideInformation(row) && isIncumplidoRow(row)) {
       pedidosIncumplidos.add(pedidoKey)
     }
 
@@ -201,7 +201,7 @@ function buildCauseRows(rows: Record<string, unknown>[]): CommercialCauseRow[] {
 
     current.tmPendiente += Number(readPendingTm(row)) || 0
 
-    if (pedidoKey && isIncumplidoRow(row)) {
+    if (pedidoKey && hasGuideInformation(row) && isIncumplidoRow(row)) {
       current.pedidos.add(pedidoKey)
     }
 
@@ -268,7 +268,7 @@ function buildDetailRows(
 
     causeValues.tmPendiente += Number(readPendingTm(row)) || 0
 
-    if (pedidoKey && isIncumplidoRow(row)) {
+    if (pedidoKey && hasGuideInformation(row) && isIncumplidoRow(row)) {
       causeValues.pedidos.add(pedidoKey)
     }
 

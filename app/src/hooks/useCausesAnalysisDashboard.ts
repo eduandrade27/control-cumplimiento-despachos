@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  aggregatePedidos,
   buildPedidoKey,
   filterRowsBySelectedMonths,
   isIncumplidoRow,
@@ -225,6 +226,45 @@ interface CauseAggregationResult {
   matchedCauseCount: number
 }
 
+interface CauseParetoRow extends CauseOperationalRow {
+  partPct: number | null
+  acumPct: number | null
+}
+
+function buildParetoRows(rows: CauseOperationalRow[]): CauseParetoRow[] {
+  const sorted = [...rows].sort((left, right) => right.tmPendiente - left.tmPendiente || right.pedidos - left.pedidos)
+  const total = sorted.reduce((sum, row) => sum + row.tmPendiente, 0)
+  let cumulative = 0
+
+  return sorted.map((row) => {
+    const partPct = total > 0 ? (row.tmPendiente / total) * 100 : null
+    cumulative += row.tmPendiente
+
+    return {
+      ...row,
+      partPct,
+      acumPct: total > 0 ? (cumulative / total) * 100 : null,
+    }
+  })
+}
+
+function getCriticalCauseRows(rows: CauseParetoRow[], targetPct = 80): CauseParetoRow[] {
+  if (rows.length === 0) {
+    return []
+  }
+
+  const result: CauseParetoRow[] = []
+
+  for (const row of rows) {
+    result.push(row)
+    if ((row.acumPct ?? 0) >= targetPct) {
+      break
+    }
+  }
+
+  return result
+}
+
 function aggregateRowsByCause(
   rows: DashboardRow[],
   causeCatalogMap: Map<string, ExcelCauseCatalogRow>,
@@ -335,6 +375,18 @@ function matchesClient(row: DashboardRow, selectedClients: string[]): boolean {
 
   const selected = new Set(selectedClients.map((value) => normalizeText(value)).filter(Boolean))
   return selected.has(client)
+}
+
+function matchesSector(row: DashboardRow, selectedSector: CausesSectorFilter): boolean {
+  if (selectedSector === 'TODOS') {
+    return true
+  }
+
+  return readSector(row) === selectedSector
+}
+
+function getCauseIdentity(value: string): string {
+  return normalizeCauseComparisonToken(value) || normalizeText(value)
 }
 
 export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAnalysisHookResult {
@@ -456,13 +508,21 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
         return false
       }
 
-      if (selectedSector !== 'TODOS') {
-        return readSector(row) === selectedSector
-      }
-
-      return true
+      return matchesSector(row, selectedSector)
     })
   }, [causeRows, selectedClients, selectedMonths, selectedSector])
+
+  const filteredDetailRowsByMainFilters = useMemo(() => {
+    const byMonths = filterRowsBySelectedMonths(detailRows, selectedMonths)
+
+    return byMonths.filter((row) => {
+      if (!matchesClient(row, selectedClients)) {
+        return false
+      }
+
+      return matchesSector(row, selectedSector)
+    })
+  }, [detailRows, selectedClients, selectedMonths, selectedSector])
 
   const causeCatalogMap = useMemo(() => buildCauseCatalogMap(causeCatalogSummary), [causeCatalogSummary])
   const rowsForGlobalMatch = useMemo(
@@ -539,6 +599,56 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
 
     return aggregated.rows.filter((row) => row.catalogClassification === 'NO')
   }, [aggregated.rows, effectiveMode])
+
+  const criticalVisibleRows = useMemo(() => getCriticalCauseRows(buildParetoRows(visibleRows)), [visibleRows])
+
+  const tmPendientesTotales = useMemo(() => {
+    const pedidos = aggregatePedidos(filteredDetailRowsByMainFilters)
+    return pedidos.reduce((sum, pedido) => sum + pedido.pendingTm, 0)
+  }, [filteredDetailRowsByMainFilters])
+
+  const impactoTotalTm = useMemo(() => {
+    const criticalCauseKeys = new Set(
+      criticalVisibleRows
+        .map((row) => getCauseIdentity(row.causa))
+        .filter(Boolean),
+    )
+
+    if (criticalCauseKeys.size === 0) {
+      return 0
+    }
+
+    const pendingTmByPedido = new Map<string, number>(
+      aggregatePedidos(filteredDetailRowsByMainFilters).map((pedido) => [pedido.key, pedido.pendingTm] as const),
+    )
+
+    const coveredPedidoKeys = new Set<string>()
+
+    for (const row of filteredRowsByMainFilters) {
+      if (!isIncumplidoRow(row)) {
+        continue
+      }
+
+      const pedidoKey = buildPedidoKey(row)
+      if (!pedidoKey || !pendingTmByPedido.has(pedidoKey)) {
+        continue
+      }
+
+      const causeRaw = readCauseValue(row)
+      if (!causeRaw) {
+        continue
+      }
+
+      const causeKey = getCauseIdentity(causeRaw)
+      if (!causeKey || !criticalCauseKeys.has(causeKey)) {
+        continue
+      }
+
+      coveredPedidoKeys.add(pedidoKey)
+    }
+
+    return Array.from(coveredPedidoKeys).reduce((sum, pedidoKey) => sum + (pendingTmByPedido.get(pedidoKey) ?? 0), 0)
+  }, [criticalVisibleRows, filteredDetailRowsByMainFilters, filteredRowsByMainFilters])
 
   const yearSnapshots = useMemo<CausesYearSnapshot[]>(() => {
     if (selectedYear === null) {
@@ -653,6 +763,8 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
     error,
     pedidosIncumplidos: totalsByVisibleRows.pedidos,
     tmPendientes: totalsByVisibleRows.tm,
+    tmPendientesTotales,
+    impactoTotalTm,
     availableMonths: availableMonths.filter((month) => month.year === selectedYear),
     availableYears,
     selectedYear,

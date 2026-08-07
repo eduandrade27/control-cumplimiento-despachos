@@ -30,14 +30,16 @@ function buildDetailSummary(
   const filteredRows = filterRowsBySelectedMonths(detailRows, selectedMonths).filter((row) => matchesSelectedClients(row, selectedClients))
   const pedidos = aggregatePedidos(filteredRows)
   const totalPedidos = pedidos.length
-  const pedidosIncumplidosCount = pedidos.filter((pedido) => pedido.isIncumplido).length
-  const pedidosCumplidosCount = totalPedidos - pedidosIncumplidosCount
+  const evaluablePedidos = pedidos.filter((pedido) => pedido.hasGuideInformation)
+  const totalPedidosEvaluables = evaluablePedidos.length
+  const pedidosIncumplidosCount = evaluablePedidos.filter((pedido) => pedido.isIncumplido).length
+  const pedidosCumplidosCount = totalPedidosEvaluables - pedidosIncumplidosCount
   const tmProgramadas = pedidos.reduce((accumulator, pedido) => accumulator + pedido.programmedTm, 0)
   const tmDespachadas = pedidos.reduce((accumulator, pedido) => accumulator + pedido.dispatchedTm, 0)
   const tmPendientes = pedidos.reduce((accumulator, pedido) => accumulator + pedido.pendingTm, 0)
   const clientesAfectados = new Set(pedidos.map((pedido) => pedido.client?.trim()).filter(Boolean)).size
   const daysWithProgramming = new Set(pedidos.filter((pedido) => pedido.programmedTm > 0 && pedido.dateKey).map((pedido) => pedido.dateKey as string))
-  const cumplimientoPct = totalPedidos > 0 ? (pedidosCumplidosCount / totalPedidos) * 100 : null
+  const cumplimientoPct = totalPedidosEvaluables > 0 ? (pedidosCumplidosCount / totalPedidosEvaluables) * 100 : null
   const promedioDiarioTmProgramadas = daysWithProgramming.size > 0 ? tmProgramadas / daysWithProgramming.size : null
   const monthKey = selectedMonths.length > 0 ? selectedMonths[0] : null
   const monthLabel = monthKey ? formatMonthLabel(monthKey) : null
@@ -52,8 +54,8 @@ function buildDetailSummary(
     tmDespachadas,
     tmPendientes,
     totalPedidos,
-    pedidosCumplidos: totalPedidos > 0 ? pedidosCumplidosCount : null,
-    pedidosIncumplidos: totalPedidos > 0 ? pedidosIncumplidosCount : null,
+    pedidosCumplidos: totalPedidosEvaluables > 0 ? pedidosCumplidosCount : null,
+    pedidosIncumplidos: totalPedidosEvaluables > 0 ? pedidosIncumplidosCount : null,
     clientesAfectados,
     cumplimientoPct,
     promedioDiarioTmProgramadas,

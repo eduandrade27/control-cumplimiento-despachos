@@ -550,7 +550,8 @@ export function CausesAnalysisPage() {
     status,
     error,
     pedidosIncumplidos,
-    tmPendientes,
+    tmPendientesTotales,
+    impactoTotalTm,
     availableYears,
     availableMonths,
     selectedYear,
@@ -668,8 +669,16 @@ export function CausesAnalysisPage() {
   const principalCause = paretoRows[0] ?? null
   const kpiValues = {
     pedidosComprometidos: hasNoRows ? null : pedidosIncumplidos,
-    tmComprometidas: hasNoRows ? null : tmPendientes,
+    tmComprometidas: hasNoRows ? null : impactoTotalTm,
   }
+
+  const impactoTotalPct = useMemo(() => {
+    if (kpiValues.tmComprometidas === null || tmPendientesTotales <= 0) {
+      return null
+    }
+
+    return (kpiValues.tmComprometidas / tmPendientesTotales) * 100
+  }, [kpiValues.tmComprometidas, tmPendientesTotales])
 
   const totalTmPeriodo = useMemo(() => rows.reduce((sum, row) => sum + row.tmPendiente, 0), [rows])
 
@@ -1144,7 +1153,11 @@ export function CausesAnalysisPage() {
             <article className="kpi-card">
               <span className="kpi-card__title">Impacto total</span>
               <strong className="kpi-card__value">{formatNumber(kpiValues.tmComprometidas, 2)} TM</strong>
-              <span className="kpi-card__hint">Resume el volumen total comprometido del período.</span>
+              <span className="kpi-card__hint">
+                {impactoTotalPct === null
+                  ? 'Resume el volumen total comprometido del período.'
+                  : `${formatPercent(impactoTotalPct, 1)} de ${formatNumber(tmPendientesTotales, 2)} TM pendientes`}
+              </span>
             </article>
 
             <article className="kpi-card causes-analysis__severity-card">
