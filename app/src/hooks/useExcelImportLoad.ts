@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { dispatchSupabaseRefresh } from '../lib/refreshEvents'
-import { CAUSE_CATALOG_STORAGE_KEY, loadCauseCatalogSummary, saveCauseCatalogSummary } from '../lib/excel'
 import { invalidateCommercialDashboardCache } from '../services/commercialService'
+import { getSharedCauseCatalogStorageKey, loadSharedCauseCatalogSummary, saveSharedCauseCatalogSummary } from '../services/causeCatalogService'
 import { invalidateHistoricDashboardCache } from '../services/historicService'
 import { invalidateOperationalBaseDataCache } from '../services/operationalDataCache'
 import { clearSupabaseRowsCache } from '../services/supabasePagination'
@@ -79,7 +79,7 @@ export function useExcelImportLoad(): UseExcelImportLoadResult {
       }))
 
       if (outcome.ok && metadata.causeCatalogSummary) {
-        saveCauseCatalogSummary(metadata.causeCatalogSummary)
+        await saveSharedCauseCatalogSummary(metadata.causeCatalogSummary)
         clearSupabaseRowsCache()
         invalidateOperationalBaseDataCache()
         invalidateCommercialDashboardCache()
@@ -87,10 +87,10 @@ export function useExcelImportLoad(): UseExcelImportLoadResult {
         const persistedCompleteRulesCount = metadata.causeCatalogSummary.rows.filter((row) => {
           return row.motivoOriginal.trim().length > 0 && row.motivoNormalizado.trim().length > 0
         }).length
-        const readSummary = loadCauseCatalogSummary()
+        const readSummary = await loadSharedCauseCatalogSummary()
 
         setStorageDiagnostics({
-          storageKey: CAUSE_CATALOG_STORAGE_KEY,
+          storageKey: getSharedCauseCatalogStorageKey(),
           persistedCompleteRulesCount,
           analysisReadRulesCount: readSummary?.rows.length ?? 0,
         })

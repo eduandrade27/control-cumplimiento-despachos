@@ -12,6 +12,7 @@ import {
 } from '../lib/operationalDetail'
 import { loadCauseCatalogSummary, normalizeCauseComparisonToken } from '../lib/excel'
 import { subscribeToSupabaseRefresh } from '../lib/refreshEvents'
+import { loadSharedCauseCatalogSummaryWithInitialMigration } from '../services/causeCatalogService'
 import { fetchOperationalBaseData } from '../services/operationalDataCache'
 import type { ExcelCauseCatalogRow, ExcelCauseCatalogSummary } from '../types/excel'
 import type { AvailableMonthOption, SupabaseErrorInfo } from '../types/operational'
@@ -349,7 +350,7 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
   const [indicatorMode, setIndicatorMode] = useState<CausesIndicatorMode>('BRUTO')
   const [status, setStatus] = useState<CausesAnalysisStatus>('loading')
   const [error, setError] = useState<SupabaseErrorInfo | null>(null)
-  const [causeCatalogSummary, setCauseCatalogSummary] = useState<ExcelCauseCatalogSummary | null>(() => loadCauseCatalogSummary())
+  const [causeCatalogSummary, setCauseCatalogSummary] = useState<ExcelCauseCatalogSummary | null>(null)
 
   const loadDashboard = useCallback(async (): Promise<LoadedState> => {
     const baseData = await fetchOperationalBaseData()
@@ -384,6 +385,7 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
 
       try {
         const loaded = await loadDashboard()
+        const sharedCauseCatalog = await loadSharedCauseCatalogSummaryWithInitialMigration(loadCauseCatalogSummary)
 
         if (!mounted) {
           return
@@ -397,7 +399,7 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
         setSelectedMonths(loaded.selectedMonths)
         setDefaultYear(loaded.defaultYear)
         setDefaultMonths(loaded.defaultMonths)
-        setCauseCatalogSummary(loadCauseCatalogSummary())
+        setCauseCatalogSummary(sharedCauseCatalog)
         setStatus(loaded.detailRows.length > 0 ? 'success' : 'empty')
       } catch (caughtError) {
         if (!mounted) {

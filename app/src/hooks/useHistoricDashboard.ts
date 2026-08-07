@@ -12,6 +12,7 @@ import {
 } from '../lib/operationalDetail'
 import { loadCauseCatalogSummary, normalizeCauseComparisonToken } from '../lib/excel'
 import { subscribeToSupabaseRefresh } from '../lib/refreshEvents'
+import { loadSharedCauseCatalogSummaryWithInitialMigration } from '../services/causeCatalogService'
 import { formatMonthLabel } from '../lib/operationalFormat'
 import { fetchOperationalBaseData } from '../services/operationalDataCache'
 import { fetchHistoricDashboardRows } from '../services/historicService'
@@ -170,6 +171,10 @@ interface AdjustedDiagnostics {
   matchedCauseCount: number
   unclassifiedCauses: string[]
   invalidAfectaCauses: string[]
+}
+
+interface HistoricPeriodRowData extends Omit<HistoricComparisonRow, 'variationVsPreviousPp'> {
+  previousComplianceOrdersPct: number | null
 }
 
 const sectorLabelMap: Record<SectorValue, string> = {
@@ -700,13 +705,12 @@ function summarizeRows(
   }
 }
 
-function buildPeriodRows(
+function buildPeriodRowData(
   detailRows: DashboardRow[],
   granularity: HistoricGranularity,
   mode: HistoricIndicatorMode,
   causeCatalogMap: Map<string, ExcelCauseCatalogRow>,
-  previousComplianceByPeriod?: Map<string, number>,
-): HistoricComparisonRow[] {
+): HistoricPeriodRowData[] {
   const detailGrouped = new Map<string, DashboardRow[]>()
 
   for (const row of detailRows) {
@@ -721,42 +725,22 @@ function buildPeriodRows(
     detailGrouped.set(periodKey, group)
   }
 
-  const orderedKeys = Array.from(detailGrouped.keys()).sort((left, right) => left.localeCompare(right))
+  return Array.from(detailGrouped.entries())
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([periodKey, rows]) => {
+      const base = summarizeRows(rows, mode, causeCatalogMap)
 
-  return orderedKeys.map((periodKey, index) => {
-    const base = summarizeRows(detailGrouped.get(periodKey) ?? [], mode, causeCatalogMap)
-
-    let previousCompliance: number | null = null
-
-    if (index > 0) {
-      const previousPeriodKey = orderedKeys[index - 1]
-      const previousSummary = summarizeRows(
-        detailGrouped.get(previousPeriodKey) ?? [],
-        mode,
-        causeCatalogMap,
-      )
-      previousCompliance = previousSummary.complianceOrdersPct
-    } else if (previousComplianceByPeriod) {
-      previousCompliance = previousComplianceByPeriod.get(periodKey) ?? null
-    }
-
-    return {
-      periodKey,
-      periodLabel: formatPeriodLabel(periodKey, granularity),
-      ...base,
-      variationVsPreviousPp:
-        previousCompliance === null || base.complianceOrdersPct === null
-          ? null
-          : base.complianceOrdersPct - previousCompliance,
-    }
-  })
+      return {
+        periodKey,
+        periodLabel: formatPeriodLabel(periodKey, granularity),
+        ...base,
+        previousComplianceOrdersPct: null,
+      }
+    })
 }
 
 function buildPreviousComplianceMap(
-  fullDetailRows: DashboardRow[],
-  granularity: HistoricGranularity,
-  mode: HistoricIndicatorMode,
-  causeCatalogMap: Map<string, ExcelCauseCatalogRow>,
+  allRows: HistoricPeriodRowData[],
   visibleFirstPeriodKey: string | null,
 ): Map<string, number> {
   const map = new Map<string, number>()
@@ -765,7 +749,6 @@ function buildPreviousComplianceMap(
     return map
   }
 
-  const allRows = buildPeriodRows(fullDetailRows, granularity, mode, causeCatalogMap)
   const firstIndex = allRows.findIndex((row) => row.periodKey === visibleFirstPeriodKey)
 
   if (firstIndex > 0) {
@@ -776,6 +759,37 @@ function buildPreviousComplianceMap(
   }
 
   return map
+}
+
+function buildComparisonRowsFromPeriodData(
+  periodData: HistoricPeriodRowData[],
+  previousComplianceByPeriod?: Map<string, number>,
+): HistoricComparisonRow[] {
+  return periodData.map((periodRow, index) => {
+    const previousCompliance = index > 0
+      ? periodData[index - 1]?.complianceOrdersPct ?? null
+      : (previousComplianceByPeriod?.get(periodRow.periodKey) ?? null)
+
+    return {
+      periodKey: periodRow.periodKey,
+      periodLabel: periodRow.periodLabel,
+      programmedOrders: periodRow.programmedOrders,
+      fulfilledOrders: periodRow.fulfilledOrders,
+      unfulfilledOrders: periodRow.unfulfilledOrders,
+      pendingEvaluationOrders: periodRow.pendingEvaluationOrders,
+      complianceOrdersPct: periodRow.complianceOrdersPct,
+      complianceTmPct: periodRow.complianceTmPct,
+      tmProgramadas: periodRow.tmProgramadas,
+      tmDespachadas: periodRow.tmDespachadas,
+      tmPendientes: periodRow.tmPendientes,
+      excludedOrdersAdjusted: periodRow.excludedOrdersAdjusted,
+      excludedCausesAdjusted: periodRow.excludedCausesAdjusted,
+      variationVsPreviousPp:
+        previousCompliance === null || periodRow.complianceOrdersPct === null
+          ? null
+          : periodRow.complianceOrdersPct - previousCompliance,
+    }
+  })
 }
 
 export function useHistoricDashboard() {
@@ -790,7 +804,7 @@ export function useHistoricDashboard() {
   const [defaultMonthFrom, setDefaultMonthFrom] = useState('')
   const [defaultMonthTo, setDefaultMonthTo] = useState('')
   const [indicatorMode, setIndicatorMode] = useState<HistoricIndicatorMode>('BRUTO')
-  const [causeCatalogSummary, setCauseCatalogSummary] = useState<ExcelCauseCatalogSummary | null>(() => loadCauseCatalogSummary())
+  const [causeCatalogSummary, setCauseCatalogSummary] = useState<ExcelCauseCatalogSummary | null>(null)
 
   const loadData = useCallback(async () => {
     setStatus('loading')
@@ -803,9 +817,10 @@ export function useHistoricDashboard() {
         const dateKey = getDateKey(readTextValue(row, ['fecha', 'fecha_programacion', 'fecha_pedido']))
         return Boolean(dateKey)
       })
+      const sharedCauseCatalog = await loadSharedCauseCatalogSummaryWithInitialMigration(loadCauseCatalogSummary)
 
       setDetailRows(rowsWithDate)
-      setCauseCatalogSummary(loadCauseCatalogSummary())
+      setCauseCatalogSummary(sharedCauseCatalog)
 
       const monthKeys = baseData.availableMonths
         .map((month) => normalizeMonthValue(month.value))
@@ -1046,31 +1061,27 @@ export function useHistoricDashboard() {
     }
   }, [adjustedModeInfo.enabled, indicatorMode])
 
-  const provisionalRows = useMemo(
-    () => buildPeriodRows(rowsByContextFilters, granularity, effectiveIndicatorMode, causeCatalogMap),
+  const visiblePeriodData = useMemo(
+    () => buildPeriodRowData(rowsByContextFilters, granularity, effectiveIndicatorMode, causeCatalogMap),
     [causeCatalogMap, effectiveIndicatorMode, granularity, rowsByContextFilters],
   )
 
+  const fullPeriodData = useMemo(
+    () => buildPeriodRowData(fullRowsByContext, granularity, effectiveIndicatorMode, causeCatalogMap),
+    [causeCatalogMap, effectiveIndicatorMode, fullRowsByContext, granularity],
+  )
+
   const previousComplianceByPeriod = useMemo(
-    () => buildPreviousComplianceMap(
-      fullRowsByContext,
-      granularity,
-      effectiveIndicatorMode,
-      causeCatalogMap,
-      provisionalRows[0]?.periodKey ?? null,
-    ),
-    [causeCatalogMap, effectiveIndicatorMode, fullRowsByContext, granularity, provisionalRows],
+    () => buildPreviousComplianceMap(fullPeriodData, visiblePeriodData[0]?.periodKey ?? null),
+    [fullPeriodData, visiblePeriodData],
   )
 
   const comparisonRows = useMemo(
-    () => buildPeriodRows(rowsByContextFilters, granularity, effectiveIndicatorMode, causeCatalogMap, previousComplianceByPeriod),
-    [causeCatalogMap, effectiveIndicatorMode, granularity, previousComplianceByPeriod, rowsByContextFilters],
+    () => buildComparisonRowsFromPeriodData(visiblePeriodData, previousComplianceByPeriod),
+    [previousComplianceByPeriod, visiblePeriodData],
   )
 
-  const comparisonRowsForCharts = useMemo(
-    () => buildPeriodRows(rowsByContextFilters, granularity, effectiveIndicatorMode, causeCatalogMap, previousComplianceByPeriod),
-    [causeCatalogMap, effectiveIndicatorMode, granularity, previousComplianceByPeriod, rowsByContextFilters],
-  )
+  const comparisonRowsForCharts = comparisonRows
 
   const totalSummary = useMemo(
     () => summarizeRows(rowsByContextFilters, effectiveIndicatorMode, causeCatalogMap),
@@ -1098,7 +1109,7 @@ export function useHistoricDashboard() {
   ])
 
   const sectorSummary = useMemo<HistoricSummaryRow[]>(() => {
-    const allSummary = summarizeRows(rowsByContextFilters, effectiveIndicatorMode, causeCatalogMap)
+    const allSummary = totalSummary
     const agroRows = rowsByContextFilters.filter((row) => readSector(row) === 'AGRO')
     const domesticoRows = rowsByContextFilters.filter((row) => readSector(row) === 'DOMESTICO')
     const agroSummary = summarizeRows(agroRows, effectiveIndicatorMode, causeCatalogMap)
@@ -1140,7 +1151,7 @@ export function useHistoricDashboard() {
         domesticoPartPct: null,
       },
     ]
-  }, [causeCatalogMap, effectiveIndicatorMode, rowsByContextFilters])
+  }, [causeCatalogMap, effectiveIndicatorMode, rowsByContextFilters, totalSummary])
 
   const addClient = useCallback((client: string) => {
     const trimmed = client.trim()
