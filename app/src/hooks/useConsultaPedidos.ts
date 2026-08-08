@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { normalizeText, readNumericValue, readTextValue } from '../lib/operationalDetail'
 import { fetchConsultaPedidosRows } from '../services/consultaService'
+import { useSharedDashboardFilters } from '../contexts/SharedDashboardFiltersContext'
 import type { ConsultaPedidoRow } from '../types/consulta'
 import type { AvailableMonthOption } from '../types/operational'
 
@@ -233,11 +234,16 @@ function normalizeConsultaRow(raw: Record<string, unknown>, sourceIndex: number)
 }
 
 export function useConsultaPedidos() {
+  const {
+    selectedYear,
+    setSelectedYear,
+    selectedMonths,
+    setSelectedMonths,
+  } = useSharedDashboardFilters()
+
   const [rows, setRows] = useState<ConsultaPedidoRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedYear, setSelectedYear] = useState<number | null>(null)
-  const [selectedMonths, setSelectedMonths] = useState<string[]>([])
   const [selectedClients, setSelectedClients] = useState<string[]>([])
   const [clientQuery, setClientQuery] = useState('')
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
@@ -265,8 +271,8 @@ export function useConsultaPedidos() {
 
         setRows(loadedData.rows)
 
-        setSelectedYear(loadedData.initialYear)
-        setSelectedMonths(loadedData.initialMonth ? [loadedData.initialMonth] : [])
+        setSelectedYear((current) => current ?? loadedData.initialYear)
+        setSelectedMonths((current) => (current.length > 0 ? current : (loadedData.initialMonth ? [loadedData.initialMonth] : [])))
         setDefaultYear(loadedData.initialYear)
         setDefaultMonth(loadedData.initialMonth)
       } catch (loadError) {
@@ -299,20 +305,18 @@ export function useConsultaPedidos() {
     [rows, selectedYear],
   )
 
-  useEffect(() => {
+  const selectedMonth = useMemo(() => {
     const currentMonth = selectedMonths[0]
     if (!currentMonth) {
-      return
+      return ''
     }
 
     const monthExists = availableMonths.some((month) => month.value === currentMonth)
-    if (!monthExists) {
-      setSelectedMonths([])
-      setSelectedDay(null)
-    }
+    return monthExists ? currentMonth : ''
   }, [availableMonths, selectedMonths])
 
-  const selectedMonth = selectedMonths[0]
+  const selectedMonthsForModule = useMemo(() => (selectedMonth ? [selectedMonth] : []), [selectedMonth])
+
   const daysInMonth = useMemo(
     () => getDaysInMonth(selectedYear, selectedMonth),
     [selectedMonth, selectedYear],
@@ -587,7 +591,7 @@ export function useConsultaPedidos() {
     availableYears,
     availableMonths,
     selectedYear,
-    selectedMonths,
+    selectedMonths: selectedMonthsForModule,
     changeYear,
     toggleMonth,
     selectedDay,

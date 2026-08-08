@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { aggregatePedidos, filterRowsBySelectedMonths, matchesSelectedClients } from '../lib/operationalDetail'
 import { fetchOperationalDashboardData } from '../services/operationalService'
+import { useSharedDashboardFilters } from '../contexts/SharedDashboardFiltersContext'
 import type { AvailableMonthOption, OperationalDashboardStatus, OperationalKpiSummary, SupabaseErrorInfo } from '../types/operational'
 
 function buildMonthKey(date: Date): string {
@@ -103,11 +104,16 @@ function getInitialMonthForYear(
 }
 
 export function useOperationalDashboard(selectedClients: string[]) {
+  const {
+    selectedYear,
+    setSelectedYear,
+    selectedMonths,
+    setSelectedMonths,
+  } = useSharedDashboardFilters()
+
   const [detailRows, setDetailRows] = useState<Record<string, unknown>[]>([])
   const [availableMonths, setAvailableMonths] = useState<AvailableMonthOption[]>([])
   const [availableYears, setAvailableYears] = useState<number[]>([])
-  const [selectedYear, setSelectedYear] = useState<number | null>(null)
-  const [selectedMonths, setSelectedMonths] = useState<string[]>([])
   const [defaultYear, setDefaultYear] = useState<number | null>(null)
   const [defaultMonths, setDefaultMonths] = useState<string[]>([])
   const [status, setStatus] = useState<OperationalDashboardStatus>('loading')
@@ -133,8 +139,8 @@ export function useOperationalDashboard(selectedClients: string[]) {
         : null
       const initialMonths = initialMonth ? [initialMonth] : []
 
-      setSelectedYear(initialYear)
-      setSelectedMonths(initialMonths)
+      setSelectedYear((current) => current ?? initialYear)
+      setSelectedMonths((current) => (current.length > 0 ? current : initialMonths))
       setDefaultYear(initialYear)
       setDefaultMonths(initialMonths)
       setStatus(data.monthlyRows.length === 0 && data.detailRows.length === 0 ? 'empty' : 'success')
@@ -142,7 +148,7 @@ export function useOperationalDashboard(selectedClients: string[]) {
       setStatus('error')
       setError(caughtError as SupabaseErrorInfo)
     }
-  }, [])
+  }, [setSelectedMonths, setSelectedYear])
 
   useEffect(() => {
     void loadDashboard()

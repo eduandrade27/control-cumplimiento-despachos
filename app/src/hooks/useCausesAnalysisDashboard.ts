@@ -15,6 +15,7 @@ import { loadCauseCatalogSummary, normalizeCauseComparisonToken } from '../lib/e
 import { subscribeToSupabaseRefresh } from '../lib/refreshEvents'
 import { loadSharedCauseCatalogSummaryWithInitialMigration } from '../services/causeCatalogService'
 import { fetchOperationalBaseData } from '../services/operationalDataCache'
+import { useSharedDashboardFilters } from '../contexts/SharedDashboardFiltersContext'
 import type { ExcelCauseCatalogRow, ExcelCauseCatalogSummary } from '../types/excel'
 import type { AvailableMonthOption, SupabaseErrorInfo } from '../types/operational'
 import type {
@@ -390,12 +391,17 @@ function getCauseIdentity(value: string): string {
 }
 
 export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAnalysisHookResult {
+  const {
+    selectedYear,
+    setSelectedYear,
+    selectedMonths,
+    setSelectedMonths,
+  } = useSharedDashboardFilters()
+
   const [detailRows, setDetailRows] = useState<DashboardRow[]>([])
   const [causeRows, setCauseRows] = useState<DashboardRow[]>([])
   const [availableMonths, setAvailableMonths] = useState<AvailableMonthOption[]>([])
   const [availableYears, setAvailableYears] = useState<number[]>([])
-  const [selectedYear, setSelectedYear] = useState<number | null>(null)
-  const [selectedMonths, setSelectedMonths] = useState<string[]>([])
   const [defaultYear, setDefaultYear] = useState<number | null>(null)
   const [defaultMonths, setDefaultMonths] = useState<string[]>([])
   const [selectedSector, setSelectedSector] = useState<CausesSectorFilter>('TODOS')
@@ -447,8 +453,8 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
         setCauseRows(loaded.causeRows)
         setAvailableMonths(loaded.availableMonths)
         setAvailableYears(loaded.availableYears)
-        setSelectedYear(loaded.selectedYear)
-        setSelectedMonths(loaded.selectedMonths)
+        setSelectedYear((current) => current ?? loaded.selectedYear)
+        setSelectedMonths((current) => (current.length > 0 ? current : loaded.selectedMonths))
         setDefaultYear(loaded.defaultYear)
         setDefaultMonths(loaded.defaultMonths)
         setCauseCatalogSummary(sharedCauseCatalog)
@@ -475,33 +481,22 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
     }
   }, [loadDashboard])
 
-  useEffect(() => {
+  const effectiveSelectedMonths = useMemo(() => {
     if (selectedYear === null) {
-      return
+      return []
     }
 
-    const yearMonths = availableMonths.filter((month) => month.year === selectedYear).map((month) => month.value)
-    const normalizedYearMonths = yearMonths.sort()
+    const validMonthSet = new Set(
+      availableMonths
+        .filter((month) => month.year === selectedYear)
+        .map((month) => month.value),
+    )
 
-    setSelectedMonths((current) => {
-      const validCurrent = current.filter((month) => normalizedYearMonths.includes(month))
-
-      if (validCurrent.length > 0) {
-        const currentSorted = [...validCurrent].sort()
-        return areSameMonths(currentSorted, validCurrent) ? validCurrent : currentSorted
-      }
-
-      const fallbackMonth = normalizedYearMonths[normalizedYearMonths.length - 1]
-      if (!fallbackMonth) {
-        return []
-      }
-
-      return [fallbackMonth]
-    })
-  }, [availableMonths, selectedYear])
+    return selectedMonths.filter((month) => validMonthSet.has(month))
+  }, [availableMonths, selectedMonths, selectedYear])
 
   const filteredRowsByMainFilters = useMemo(() => {
-    const byMonths = filterRowsBySelectedMonths(causeRows, selectedMonths)
+    const byMonths = filterRowsBySelectedMonths(causeRows, effectiveSelectedMonths)
 
     return byMonths.filter((row) => {
       if (!matchesClient(row, selectedClients)) {
@@ -510,10 +505,10 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
 
       return matchesSector(row, selectedSector)
     })
-  }, [causeRows, selectedClients, selectedMonths, selectedSector])
+  }, [causeRows, effectiveSelectedMonths, selectedClients, selectedSector])
 
   const filteredDetailRowsByMainFilters = useMemo(() => {
-    const byMonths = filterRowsBySelectedMonths(detailRows, selectedMonths)
+    const byMonths = filterRowsBySelectedMonths(detailRows, effectiveSelectedMonths)
 
     return byMonths.filter((row) => {
       if (!matchesClient(row, selectedClients)) {
@@ -522,7 +517,7 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
 
       return matchesSector(row, selectedSector)
     })
-  }, [detailRows, selectedClients, selectedMonths, selectedSector])
+  }, [detailRows, effectiveSelectedMonths, selectedClients, selectedSector])
 
   const causeCatalogMap = useMemo(() => buildCauseCatalogMap(causeCatalogSummary), [causeCatalogSummary])
   const rowsForGlobalMatch = useMemo(
@@ -768,7 +763,7 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
     availableMonths: availableMonths.filter((month) => month.year === selectedYear),
     availableYears,
     selectedYear,
-    selectedMonths,
+    selectedMonths: effectiveSelectedMonths,
     selectedSector,
     indicatorMode: effectiveMode,
     adjustedModeInfo,

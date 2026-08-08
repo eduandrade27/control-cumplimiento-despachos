@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from '../components/Sidebar'
 import { PageHeader } from '../components/PageHeader'
 import { navigationItems, getModuleLabel } from '../config/navigation'
+import { SharedDashboardFiltersProvider } from '../contexts/SharedDashboardFiltersContext'
 
 export function MainLayout() {
   const location = useLocation()
@@ -11,20 +12,22 @@ export function MainLayout() {
   const currentTitle = useMemo(() => getModuleLabel(location.pathname), [location.pathname])
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        items={navigationItems}
-        activePath={location.pathname}
-        collapsed={collapsed}
-        onToggle={() => setCollapsed((value) => !value)}
-      />
+    <SharedDashboardFiltersProvider>
+      <div className="app-shell">
+        <Sidebar
+          items={navigationItems}
+          activePath={location.pathname}
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((value) => !value)}
+        />
 
-      <div className="main-panel">
-        <PageHeader title={currentTitle} />
-        <main className="content-area">
-          <Outlet />
-        </main>
+        <div className="main-panel">
+          <PageHeader title={currentTitle} />
+          <main className="content-area">
+            <Outlet />
+          </main>
+        </div>
       </div>
-    </div>
+    </SharedDashboardFiltersProvider>
   )
 }

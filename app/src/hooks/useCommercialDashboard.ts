@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { buildPedidoKey, filterRowsBySelectedMonths, hasGuideInformation, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readAreaName, readCauseName, readClientName, readPendingTm, readTextValue } from '../lib/operationalDetail'
 import { fetchCommercialDashboardData } from '../services/commercialService'
+import { useSharedDashboardFilters } from '../contexts/SharedDashboardFiltersContext'
 import type { CommercialCauseRow, CommercialDetailCauseRow, CommercialDetailRow, CommercialKpis } from '../types/commercial'
 import type { AvailableMonthOption, SupabaseErrorInfo } from '../types/operational'
 
@@ -298,13 +299,18 @@ function buildDetailRows(
 }
 
 export function useCommercialDashboard(selectedClients: string[], selectedArea: string | null) {
+  const {
+    selectedYear,
+    setSelectedYear,
+    selectedMonths,
+    setSelectedMonths,
+  } = useSharedDashboardFilters()
+
   const [detailRows, setDetailRows] = useState<Record<string, unknown>[]>([])
   const [causeRows, setCauseRows] = useState<Record<string, unknown>[]>([])
   const [areaRows, setAreaRows] = useState<Record<string, unknown>[]>([])
   const [availableMonths, setAvailableMonths] = useState<AvailableMonthOption[]>([])
   const [availableYears, setAvailableYears] = useState<number[]>([])
-  const [selectedYear, setSelectedYear] = useState<number | null>(null)
-  const [selectedMonths, setSelectedMonths] = useState<string[]>([])
   const [defaultYear, setDefaultYear] = useState<number | null>(null)
   const [defaultMonths, setDefaultMonths] = useState<string[]>([])
   const [status, setStatus] = useState<CommercialDashboardStatus>('loading')
@@ -332,8 +338,8 @@ export function useCommercialDashboard(selectedClients: string[], selectedArea: 
         : null
       const initialMonths = initialMonth ? [initialMonth] : []
 
-      setSelectedYear(initialYear)
-      setSelectedMonths(initialMonths)
+      setSelectedYear((current) => current ?? initialYear)
+      setSelectedMonths((current) => (current.length > 0 ? current : initialMonths))
       setDefaultYear(initialYear)
       setDefaultMonths(initialMonths)
       setStatus(data.detailRows.length === 0 && data.causeRows.length === 0 && data.areaRows.length === 0 ? 'empty' : 'success')
@@ -341,7 +347,7 @@ export function useCommercialDashboard(selectedClients: string[], selectedArea: 
       setStatus('error')
       setError(caughtError as SupabaseErrorInfo)
     }
-  }, [])
+  }, [setSelectedMonths, setSelectedYear])
 
   useEffect(() => {
     void loadDashboard()
