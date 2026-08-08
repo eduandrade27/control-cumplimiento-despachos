@@ -19,6 +19,7 @@ export function CommercialPage() {
   const [showAllCauses, setShowAllCauses] = useState(false)
   const [showAllClients, setShowAllClients] = useState(false)
   const [selectedArea, setSelectedArea] = useState<string | null>(null)
+  const [selectedCause, setSelectedCause] = useState<string | null>(null)
 
   const {
     status,
@@ -82,6 +83,7 @@ export function CommercialPage() {
     setShowAllCauses(false)
     setShowAllClients(false)
     setSelectedArea(null)
+    setSelectedCause(null)
   }
 
   const toggleRowExpansion = (rowKey: string) => {
@@ -96,7 +98,30 @@ export function CommercialPage() {
 
   const hasAnyFilters = hasActiveFilters || selectedClients.length > 0
   const visibleCauseRows = showAllCauses ? causeTableRows : causeTableRows.slice(0, 10)
-  const visibleCommercialRows = showAllClients ? commercialDetailRows : commercialDetailRows.slice(0, 10)
+  const filteredCommercialRows = useMemo(() => {
+    if (!selectedCause) {
+      return commercialDetailRows
+    }
+
+    const selectedCauseKey = normalizeSearchText(selectedCause)
+    return commercialDetailRows
+      .map((row) => {
+        const selectedCauseRow = row.causes.find((cause) => normalizeSearchText(cause.causa) === selectedCauseKey)
+
+        if (!selectedCauseRow) {
+          return null
+        }
+
+        return {
+          ...row,
+          tmPendiente: selectedCauseRow.tmPendiente,
+          causes: [selectedCauseRow],
+        }
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+  }, [commercialDetailRows, selectedCause])
+
+  const visibleCommercialRows = showAllClients ? filteredCommercialRows : filteredCommercialRows.slice(0, 10)
 
   const kpiCards = useMemo(() => [
     {
@@ -298,13 +323,52 @@ export function CommercialPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleCauseRows.map((row) => (
-                      <tr key={row.causa}>
+                    {visibleCauseRows.map((row) => {
+                      const isSelected = selectedCause !== null && normalizeSearchText(selectedCause) === normalizeSearchText(row.causa)
+
+                      return (
+                      <tr
+                        key={row.causa}
+                        className={isSelected ? 'commercial-page__detail-row is-expanded' : ''}
+                        onClick={() => {
+                          setSelectedCause((current) => {
+                            if (current !== null && normalizeSearchText(current) === normalizeSearchText(row.causa)) {
+                              return null
+                            }
+
+                            return row.causa
+                          })
+                          setShowAllClients(false)
+                          setExpandedRows([])
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            setSelectedCause((current) => {
+                              if (current !== null && normalizeSearchText(current) === normalizeSearchText(row.causa)) {
+                                return null
+                              }
+
+                              return row.causa
+                            })
+                            setShowAllClients(false)
+                            setExpandedRows([])
+                          }
+                        }}
+                        aria-label={isSelected ? `Quitar filtro por causa ${row.causa}` : `Filtrar detalle por causa ${row.causa}`}
+                        style={{
+                          cursor: 'pointer',
+                          backgroundColor: isSelected ? '#e2e8f0' : undefined,
+                        }}
+                      >
                         <td className="commercial-page__table-cell-left">{row.causa}</td>
                         <td className="commercial-page__table-cell-center">{formatNumber(row.tmPendiente, 2)}</td>
                         <td className="commercial-page__table-cell-center">{formatNumber(row.pedidosIncumplidos)}</td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -324,7 +388,11 @@ export function CommercialPage() {
               <header className="operational-card__header">
                 <div>
                   <h3>Detalle comercial</h3>
-                  <p>Resumen de TM pendiente por cliente y vendedor.</p>
+                  <p>
+                    {selectedCause
+                      ? `Filtrado por causa: ${selectedCause}`
+                      : 'Resumen de TM pendiente por cliente y vendedor.'}
+                  </p>
                 </div>
               </header>
 
@@ -400,11 +468,18 @@ export function CommercialPage() {
                         </Fragment>
                       )
                     })}
+                    {visibleCommercialRows.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="commercial-page__table-cell-left">
+                          No hay clientes asociados a la causa seleccionada.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
 
-              {commercialDetailRows.length > 10 && (
+              {filteredCommercialRows.length > 10 && (
                 <button
                   type="button"
                   className="commercial-page__toggle-more"
