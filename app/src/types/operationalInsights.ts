@@ -59,5 +59,7 @@ export interface OperationalInsightsData {
   areaPendingTm: OperationalInsightSeriesPoint[]
   topCauseRows: OperationalTopRow[]
   topClientRows: OperationalTopRow[]
+  fullCauseRows: OperationalTopRow[]
+  fullClientRows: OperationalTopRow[]
   availableClients: string[]
 }

@@ -17,10 +17,15 @@ export function fetchHistoricDashboardRows(): Promise<HistoricDashboardRow[]> {
     'lineas_despacho',
     1000,
     'fecha,orden_venta,cod_parte,cliente,sector,cant_despachada,status_despacho,tm_programada,tm_despachada,tm_pendiente,causa',
-  ).catch((error) => {
-    historicDashboardRowsPromise = null
-    throw error
-  })
+  )
+    .then((rows) => rows.map((row) => ({
+      ...row,
+      has_guia: row.cant_despachada !== null && row.cant_despachada !== undefined,
+    })))
+    .catch((error) => {
+      historicDashboardRowsPromise = null
+      throw error
+    })
 
   return historicDashboardRowsPromise
 }

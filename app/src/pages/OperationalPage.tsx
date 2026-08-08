@@ -5,6 +5,7 @@ import { OperationalCharts } from '../components/operational/OperationalCharts'
 import { useOperationalDashboard } from '../hooks/useOperationalDashboard'
 import { useOperationalInsights } from '../hooks/useOperationalInsights'
 import { formatNumber, formatPercent } from '../lib/operationalFormat'
+import { exportOperationalPdf } from '../lib/operationalPdfExport'
 
 function normalizeSearchText(value: string): string {
   return value
@@ -102,6 +103,30 @@ export function OperationalPage() {
     setClientQuery('')
   }
 
+  const handleExportPdf = () => {
+    if (status !== 'success' || insightsStatus !== 'success' || !insightsData) {
+      return
+    }
+
+    exportOperationalPdf({
+      kpis,
+      selectedYear,
+      selectedMonths,
+      selectedClients,
+      crossFilters,
+      availableMonths,
+      insightsData: {
+        temporalSeries: insightsData.temporalSeries,
+        incumplimientosSeries: insightsData.incumplimientosSeries,
+        volumeSeries: insightsData.volumeSeries,
+        areaIncidents: insightsData.areaIncidents,
+        areaPendingTm: insightsData.areaPendingTm,
+        fullCauseRows: insightsData.fullCauseRows,
+        fullClientRows: insightsData.fullClientRows,
+      },
+    })
+  }
+
   const kpiCards = useMemo(() => [
     {
       key: 'tmProgramadas',
@@ -164,6 +189,15 @@ export function OperationalPage() {
           <h2>Panorama del desempeño</h2>
           <p>Consulta los KPI reales del negocio desde las vistas de Supabase.</p>
         </div>
+
+        <button
+          type="button"
+          className="operational-page__reset operational-page__reset--compact"
+          onClick={handleExportPdf}
+          disabled={status !== 'success' || insightsStatus !== 'success' || !insightsData}
+        >
+          Reporte Ejecutivo - Operativo (PDF)
+        </button>
       </div>
 
       <div className="operational-page__controls">

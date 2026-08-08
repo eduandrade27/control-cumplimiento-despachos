@@ -176,7 +176,7 @@ function buildIncumplimientosSeries(rows: OperationalInsightRow[]): OperationalI
     }))
 }
 
-function buildTopCauseRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
+function buildSortedCauseRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
   const map = new Map<string, { tmPendiente: number; pedidos: Set<string> }>()
 
   for (const row of rows) {
@@ -206,7 +206,10 @@ function buildTopCauseRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
       pedidosIncumplidos: details.pedidos.size,
     }))
     .sort((left, right) => right.tmPendiente - left.tmPendiente || right.pedidosIncumplidos - left.pedidosIncumplidos)
-    .slice(0, 5)
+}
+
+function buildTopCauseRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
+  return buildSortedCauseRows(rows).slice(0, 5)
 }
 
 function buildAreaSeries(rows: OperationalInsightRow[], mode: 'incidents' | 'pending'): OperationalInsightSeriesPoint[] {
@@ -241,7 +244,7 @@ function buildAreaSeries(rows: OperationalInsightRow[], mode: 'incidents' | 'pen
     .sort((left, right) => (right.value ?? 0) - (left.value ?? 0))
 }
 
-function buildTopClientRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
+function buildSortedClientRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
   const map = new Map<string, { tmPendiente: number; pedidos: Set<string> }>()
 
   for (const row of rows) {
@@ -270,7 +273,10 @@ function buildTopClientRows(rows: OperationalInsightRow[]): OperationalTopRow[] 
       pedidosIncumplidos: values.pedidos.size,
     }))
     .sort((left, right) => right.tmPendiente - left.tmPendiente || right.pedidosIncumplidos - left.pedidosIncumplidos)
-    .slice(0, 5)
+}
+
+function buildTopClientRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
+  return buildSortedClientRows(rows).slice(0, 5)
 }
 
 function buildAvailableClients(rows: OperationalInsightRow[]): string[] {
@@ -342,6 +348,8 @@ export async function fetchOperationalInsightsData(
     areaPendingTm: buildAreaSeries(filteredAreaRows, 'pending'),
     topCauseRows: buildTopCauseRows(filteredCauseRows),
     topClientRows: buildTopClientRows(filteredPedidoRows),
+    fullCauseRows: buildSortedCauseRows(filteredCauseRows),
+    fullClientRows: buildSortedClientRows(filteredPedidoRows),
     availableClients: buildAvailableClients(filteredPedidoRows),
   }
 
