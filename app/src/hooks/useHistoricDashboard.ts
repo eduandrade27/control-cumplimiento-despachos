@@ -14,8 +14,7 @@ import { loadCauseCatalogSummary, normalizeCauseComparisonToken } from '../lib/e
 import { subscribeToSupabaseRefresh } from '../lib/refreshEvents'
 import { loadSharedCauseCatalogSummaryWithInitialMigration } from '../services/causeCatalogService'
 import { formatMonthLabel } from '../lib/operationalFormat'
-import { fetchOperationalBaseData } from '../services/operationalDataCache'
-import { fetchHistoricDashboardRows } from '../services/historicService'
+import { fetchHistoricAvailableMonthKeys, fetchHistoricDashboardRows } from '../services/historicService'
 import type { SupabaseErrorInfo } from '../types/operational'
 import type {
   HistoricComparisonRow,
@@ -811,7 +810,7 @@ export function useHistoricDashboard() {
     setError(null)
 
     try {
-      const baseData = await fetchOperationalBaseData()
+      const availableMonthKeys = await fetchHistoricAvailableMonthKeys()
       const lineasDespachoRows = await fetchHistoricDashboardRows()
       const rowsWithDate = lineasDespachoRows.filter((row) => {
         const dateKey = getDateKey(readTextValue(row, ['fecha', 'fecha_programacion', 'fecha_pedido']))
@@ -822,10 +821,9 @@ export function useHistoricDashboard() {
       setDetailRows(rowsWithDate)
       setCauseCatalogSummary(sharedCauseCatalog)
 
-      const monthKeys = baseData.availableMonths
-        .map((month) => normalizeMonthValue(month.value))
+      const monthKeys = availableMonthKeys
+        .map((month) => normalizeMonthValue(month))
         .filter((value) => value.length > 0)
-        .sort((left, right) => left.localeCompare(right))
 
       const now = new Date(Date.now() - 24 * 60 * 60 * 1000)
       const defaultMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
