@@ -97,7 +97,10 @@ export function useExcelImportLoad(): UseExcelImportLoadResult {
       }
 
       setResult(outcome)
-      dispatchSupabaseRefresh()
+
+      if (outcome.ok) {
+        dispatchSupabaseRefresh()
+      }
     } catch (error) {
       setProgress((previous) => previous && ({
         ...previous,
@@ -112,7 +115,6 @@ export function useExcelImportLoad(): UseExcelImportLoadResult {
       }
 
       setResult(fallbackResult)
-      dispatchSupabaseRefresh()
     } finally {
       setIsLoading(false)
     }

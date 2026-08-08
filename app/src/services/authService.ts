@@ -21,6 +21,10 @@ export async function getCurrentSession() {
   return supabase.auth.getSession()
 }
 
+export async function updateCurrentUserPassword(password: string) {
+  return supabase.auth.updateUser({ password })
+}
+
 export function getUserRole(user: User | null | undefined): AppRole {
   const role = user?.app_metadata?.role
 
