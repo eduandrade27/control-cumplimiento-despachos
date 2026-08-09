@@ -1,9 +1,8 @@
 import { supabase } from '../lib/supabase'
-import { fetchAllRowsFromView } from './supabasePagination'
 
 export type HistoricDashboardRow = Record<string, unknown>
 
-let historicDashboardRowsPromise: Promise<HistoricDashboardRow[]> | null = null
+const historicDashboardRowsPromises = new Map<string, Promise<HistoricDashboardRow[]>>()
 let historicAvailableMonthKeysPromise: Promise<string[]> | null = null
 
 function parseMonthKey(value: unknown): string {
@@ -55,7 +54,7 @@ function readMonthCandidate(row: Record<string, unknown>): unknown {
 }
 
 export function invalidateHistoricDashboardCache(): void {
-  historicDashboardRowsPromise = null
+  historicDashboardRowsPromises.clear()
   historicAvailableMonthKeysPromise = null
 }
 
@@ -92,24 +91,65 @@ export function fetchHistoricAvailableMonthKeys(): Promise<string[]> {
   return historicAvailableMonthKeysPromise
 }
 
-export function fetchHistoricDashboardRows(): Promise<HistoricDashboardRow[]> {
-  if (historicDashboardRowsPromise) {
-    return historicDashboardRowsPromise
+function getRangeCacheKey(range?: { from?: string; to?: string }): string {
+  const from = range?.from ?? ''
+  const to = range?.to ?? ''
+  return `${from}|${to}`
+}
+
+export function fetchHistoricDashboardRows(range?: { from?: string; to?: string }): Promise<HistoricDashboardRow[]> {
+  const cacheKey = getRangeCacheKey(range)
+  const cached = historicDashboardRowsPromises.get(cacheKey)
+
+  if (cached) {
+    return cached
   }
 
-  historicDashboardRowsPromise = fetchAllRowsFromView<HistoricDashboardRow>(
-    'lineas_despacho',
-    1000,
-    'fecha,orden_venta,cod_parte,cliente,sector,cant_despachada,status_despacho,tm_programada,tm_despachada,tm_pendiente,causa',
-  )
+  const request = (async () => {
+    const rows: HistoricDashboardRow[] = []
+    let fromRow = 0
+
+    while (true) {
+      let query = supabase
+        .schema('despachos')
+        .from('lineas_despacho')
+        .select('fecha,orden_venta,cod_parte,cliente,sector,cant_despachada,status_despacho,tm_programada,tm_despachada,tm_pendiente,causa')
+
+      if (range?.from) {
+        query = query.gte('fecha', range.from)
+      }
+
+      if (range?.to) {
+        query = query.lte('fecha', range.to)
+      }
+
+      const { data, error } = await query.range(fromRow, fromRow + 1000 - 1)
+
+      if (error) {
+        throw error
+      }
+
+      const batch = (data ?? []) as HistoricDashboardRow[]
+      rows.push(...batch)
+
+      if (batch.length < 1000) {
+        break
+      }
+
+      fromRow += 1000
+    }
+
+    return rows
+  })()
     .then((rows) => rows.map((row) => ({
       ...row,
       has_guia: row.cant_despachada !== null && row.cant_despachada !== undefined,
     })))
     .catch((error) => {
-      historicDashboardRowsPromise = null
+      historicDashboardRowsPromises.delete(cacheKey)
       throw error
     })
 
-  return historicDashboardRowsPromise
+  historicDashboardRowsPromises.set(cacheKey, request)
+  return request
 }

@@ -58,6 +58,9 @@ export function HistoricPage() {
     monthTo,
     setMonthFrom,
     setMonthTo,
+    canApplyPeriod,
+    applyPeriod,
+    periodValidationMessage,
     selectedClient,
     clientQuery,
     setClientQuery,
@@ -106,6 +109,17 @@ export function HistoricPage() {
               onChange={(event) => setMonthTo(event.target.value)}
               aria-label="Hasta mes y año"
             />
+          </div>
+
+          <div className="historic-page__filter-item historic-page__filter-item--action">
+            <button
+              type="button"
+              className="operational-page__reset operational-page__reset--compact"
+              onClick={() => void applyPeriod()}
+              disabled={!canApplyPeriod}
+            >
+              Aplicar período
+            </button>
           </div>
 
           <div className="historic-page__filter-item">
@@ -188,6 +202,9 @@ export function HistoricPage() {
             </button>
           </div>
         </div>
+        {periodValidationMessage && (
+          <p className="operational-page__empty-state" role="alert">{periodValidationMessage}</p>
+        )}
       </header>
 
       {status === 'loading' && (

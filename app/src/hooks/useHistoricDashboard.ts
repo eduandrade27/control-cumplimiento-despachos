@@ -14,7 +14,7 @@ import { loadCauseCatalogSummary, normalizeCauseComparisonToken } from '../lib/e
 import { subscribeToSupabaseRefresh } from '../lib/refreshEvents'
 import { loadSharedCauseCatalogSummaryWithInitialMigration } from '../services/causeCatalogService'
 import { formatMonthLabel } from '../lib/operationalFormat'
-import { fetchHistoricAvailableMonthKeys, fetchHistoricDashboardRows } from '../services/historicService'
+import { fetchHistoricDashboardRows, invalidateHistoricDashboardCache } from '../services/historicService'
 import type { SupabaseErrorInfo } from '../types/operational'
 import type {
   HistoricComparisonRow,
@@ -32,6 +32,98 @@ import type { ExcelCauseCatalogRow, ExcelCauseCatalogSummary } from '../types/ex
 type DashboardRow = Record<string, unknown>
 type SectorValue = Exclude<HistoricSectorFilter, 'TODOS'>
 type OrderStatus = 'FULFILLED' | 'UNFULFILLED' | 'PENDING_EVALUATION'
+
+interface HistoricSessionCache {
+  appliedMonthFrom: string
+  appliedMonthTo: string
+  defaultMonthFrom: string
+  defaultMonthTo: string
+  dataVersion: number
+  detailRows: DashboardRow[]
+  causeCatalogSummary: ExcelCauseCatalogSummary | null
+  adjustedDiagnosticsSnapshots: Map<string, AdjustedDiagnostics>
+  derivedSnapshots: Map<string, HistoricDerivedSnapshot>
+}
+
+let historicSessionCache: HistoricSessionCache | null = null
+let historicSessionDataVersion = 0
+
+type HistoricSummaryMetrics = Omit<HistoricPeriodMetrics, 'periodKey' | 'periodLabel'>
+
+interface HistoricDerivedSnapshot {
+  visiblePeriodData: HistoricPeriodRowData[]
+  fullPeriodData: HistoricPeriodRowData[]
+  totalSummary: HistoricSummaryMetrics
+  sectorSummary: HistoricSummaryRow[]
+}
+
+function buildHistoricAdjustedDiagnosticsKey(params: {
+  dataVersion: number
+  sector: HistoricSectorFilter
+  client: string | null
+}): string {
+  return [params.dataVersion, params.sector, normalizeText(params.client)].join('|')
+}
+
+function getOrCreateHistoricAdjustedDiagnostics(
+  cache: HistoricSessionCache | null,
+  key: string,
+  buildDiagnostics: () => AdjustedDiagnostics,
+): AdjustedDiagnostics {
+  if (!cache) {
+    return buildDiagnostics()
+  }
+
+  const cachedDiagnostics = cache.adjustedDiagnosticsSnapshots.get(key)
+  if (cachedDiagnostics) {
+    return cachedDiagnostics
+  }
+
+  const diagnostics = buildDiagnostics()
+  cache.adjustedDiagnosticsSnapshots.set(key, diagnostics)
+  return diagnostics
+}
+
+function buildHistoricDerivedSnapshotKey(params: {
+  dataVersion: number
+  periodFrom: string
+  periodTo: string
+  sector: HistoricSectorFilter
+  client: string | null
+  indicatorMode: HistoricIndicatorMode
+  granularity: HistoricGranularity
+}): string {
+  const normalizedClient = normalizeText(params.client)
+
+  return [
+    params.dataVersion,
+    params.periodFrom,
+    params.periodTo,
+    params.sector,
+    normalizedClient,
+    params.indicatorMode,
+    params.granularity,
+  ].join('|')
+}
+
+function getOrCreateHistoricDerivedSnapshot(
+  cache: HistoricSessionCache | null,
+  key: string,
+  buildSnapshot: () => HistoricDerivedSnapshot,
+): HistoricDerivedSnapshot {
+  if (!cache) {
+    return buildSnapshot()
+  }
+
+  const cachedSnapshot = cache.derivedSnapshots.get(key)
+  if (cachedSnapshot) {
+    return cachedSnapshot
+  }
+
+  const snapshot = buildSnapshot()
+  cache.derivedSnapshots.set(key, snapshot)
+  return snapshot
+}
 
 function normalizeFieldToken(value: string): string {
   return normalizeText(value).replace(/[^a-z0-9]/g, '')
@@ -211,6 +303,17 @@ function normalizeMonthValue(value: unknown): string {
 
   const trimmed = value.trim()
   return /^\d{4}-\d{2}$/.test(trimmed) ? trimmed : ''
+}
+
+function buildCurrentYearDefaultRange(): { from: string; to: string } {
+  const now = new Date()
+  const year = now.getFullYear()
+  const currentMonth = String(now.getMonth() + 1).padStart(2, '0')
+
+  return {
+    from: `${year}-01`,
+    to: `${year}-${currentMonth}`,
+  }
 }
 
 function getMonthDateRange(monthKey: string): { from: string; to: string } {
@@ -793,82 +896,173 @@ function buildComparisonRowsFromPeriodData(
 
 export function useHistoricDashboard() {
   const [detailRows, setDetailRows] = useState<DashboardRow[]>([])
+  const [dataVersion, setDataVersion] = useState(0)
   const [status, setStatus] = useState<HistoricStatus>('loading')
   const [error, setError] = useState<SupabaseErrorInfo | null>(null)
   const [monthFrom, setMonthFrom] = useState('')
   const [monthTo, setMonthTo] = useState('')
+  const [appliedMonthFrom, setAppliedMonthFrom] = useState('')
+  const [appliedMonthTo, setAppliedMonthTo] = useState('')
   const [selectedSector, setSelectedSector] = useState<HistoricSectorFilter>('TODOS')
   const [selectedClient, setSelectedClient] = useState<string | null>(null)
   const [clientQuery, setClientQuery] = useState('')
   const [defaultMonthFrom, setDefaultMonthFrom] = useState('')
   const [defaultMonthTo, setDefaultMonthTo] = useState('')
+  const [periodValidationMessage, setPeriodValidationMessage] = useState<string | null>(null)
   const [indicatorMode, setIndicatorMode] = useState<HistoricIndicatorMode>('BRUTO')
   const [causeCatalogSummary, setCauseCatalogSummary] = useState<ExcelCauseCatalogSummary | null>(null)
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (activeRange: { from: string; to: string }) => {
     setStatus('loading')
     setError(null)
 
     try {
-      const availableMonthKeys = await fetchHistoricAvailableMonthKeys()
-      const lineasDespachoRows = await fetchHistoricDashboardRows()
+      const fromRange = getMonthDateRange(activeRange.from)
+      const toRange = getMonthDateRange(activeRange.to)
+
+      const lineasDespachoRows = await fetchHistoricDashboardRows({
+        from: fromRange.from,
+        to: toRange.to,
+      })
       const rowsWithDate = lineasDespachoRows.filter((row) => {
         const dateKey = getDateKey(readTextValue(row, ['fecha', 'fecha_programacion', 'fecha_pedido']))
         return Boolean(dateKey)
       })
       const sharedCauseCatalog = await loadSharedCauseCatalogSummaryWithInitialMigration(loadCauseCatalogSummary)
+      const nextDataVersion = historicSessionDataVersion + 1
+
+      historicSessionDataVersion = nextDataVersion
 
       setDetailRows(rowsWithDate)
+      setDataVersion(nextDataVersion)
       setCauseCatalogSummary(sharedCauseCatalog)
 
-      const monthKeys = availableMonthKeys
-        .map((month) => normalizeMonthValue(month))
-        .filter((value) => value.length > 0)
-
-      const now = new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const defaultMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-      const initialMonth = monthKeys.includes(defaultMonthKey)
-        ? defaultMonthKey
-        : (monthKeys[monthKeys.length - 1] ?? '')
-
-      setMonthFrom(initialMonth)
-      setMonthTo(initialMonth)
-      setDefaultMonthFrom(initialMonth)
-      setDefaultMonthTo(initialMonth)
+      historicSessionCache = {
+        appliedMonthFrom: activeRange.from,
+        appliedMonthTo: activeRange.to,
+        defaultMonthFrom: defaultMonthFrom || activeRange.from,
+        defaultMonthTo: defaultMonthTo || activeRange.to,
+        dataVersion: nextDataVersion,
+        detailRows: rowsWithDate,
+        causeCatalogSummary: sharedCauseCatalog,
+        adjustedDiagnosticsSnapshots: new Map(),
+        derivedSnapshots: new Map(),
+      }
 
       setStatus(rowsWithDate.length > 0 ? 'success' : 'empty')
     } catch (caughtError) {
       setStatus('error')
       setError(caughtError as SupabaseErrorInfo)
     }
-  }, [])
+  }, [defaultMonthFrom, defaultMonthTo])
 
   useEffect(() => {
-    void loadData()
+    let mounted = true
+
+    const initialize = async () => {
+      if (historicSessionCache) {
+        setMonthFrom(historicSessionCache.appliedMonthFrom)
+        setMonthTo(historicSessionCache.appliedMonthTo)
+        setAppliedMonthFrom(historicSessionCache.appliedMonthFrom)
+        setAppliedMonthTo(historicSessionCache.appliedMonthTo)
+        setDefaultMonthFrom(historicSessionCache.defaultMonthFrom)
+        setDefaultMonthTo(historicSessionCache.defaultMonthTo)
+        setDataVersion(historicSessionCache.dataVersion)
+        setDetailRows(historicSessionCache.detailRows)
+        setCauseCatalogSummary(historicSessionCache.causeCatalogSummary)
+        setPeriodValidationMessage(null)
+        setStatus(historicSessionCache.detailRows.length > 0 ? 'success' : 'empty')
+        return
+      }
+
+      const defaultRange = buildCurrentYearDefaultRange()
+
+      if (!mounted) {
+        return
+      }
+
+      setMonthFrom(defaultRange.from)
+      setMonthTo(defaultRange.to)
+      setAppliedMonthFrom(defaultRange.from)
+      setAppliedMonthTo(defaultRange.to)
+      setDefaultMonthFrom(defaultRange.from)
+      setDefaultMonthTo(defaultRange.to)
+      setPeriodValidationMessage(null)
+
+      historicSessionCache = {
+        appliedMonthFrom: defaultRange.from,
+        appliedMonthTo: defaultRange.to,
+        defaultMonthFrom: defaultRange.from,
+        defaultMonthTo: defaultRange.to,
+        dataVersion: 0,
+        detailRows: [],
+        causeCatalogSummary: null,
+        adjustedDiagnosticsSnapshots: new Map(),
+        derivedSnapshots: new Map(),
+      }
+
+      await loadData(defaultRange)
+    }
+
+    void initialize()
+
+    return () => {
+      mounted = false
+    }
   }, [loadData])
 
   useEffect(() => {
     const unsubscribe = subscribeToSupabaseRefresh(() => {
-      void loadData()
+      invalidateHistoricDashboardCache()
+      historicSessionCache = null
+
+      if (!appliedMonthFrom || !appliedMonthTo) {
+        return
+      }
+
+      void loadData({ from: appliedMonthFrom, to: appliedMonthTo })
     })
 
     return unsubscribe
-  }, [loadData])
+  }, [appliedMonthFrom, appliedMonthTo, loadData])
+
+  const canApplyPeriod = useMemo(
+    () => monthFrom !== appliedMonthFrom || monthTo !== appliedMonthTo,
+    [appliedMonthFrom, appliedMonthTo, monthFrom, monthTo],
+  )
+
+  const applyPeriod = useCallback(async () => {
+    setPeriodValidationMessage(null)
+
+    if (!monthFrom || !monthTo) {
+      setPeriodValidationMessage('Selecciona ambos períodos antes de aplicar.')
+      return
+    }
+
+    if (monthFrom > monthTo) {
+      setPeriodValidationMessage('El período Desde no puede ser posterior a Hasta.')
+      return
+    }
+
+    setAppliedMonthFrom(monthFrom)
+    setAppliedMonthTo(monthTo)
+    await loadData({ from: monthFrom, to: monthTo })
+  }, [loadData, monthFrom, monthTo])
 
   const monthRange = useMemo(() => {
-    const fromRange = getMonthDateRange(monthFrom)
-    const toRange = getMonthDateRange(monthTo)
+    const fromRange = getMonthDateRange(appliedMonthFrom)
+    const toRange = getMonthDateRange(appliedMonthTo)
 
     if (!fromRange.from || !toRange.to) {
       return { from: '', to: '', fromMonth: '', toMonth: '' }
     }
 
     if (fromRange.from <= toRange.to) {
-      return { from: fromRange.from, to: toRange.to, fromMonth: monthFrom, toMonth: monthTo }
+      return { from: fromRange.from, to: toRange.to, fromMonth: appliedMonthFrom, toMonth: appliedMonthTo }
     }
 
-    return { from: toRange.from, to: fromRange.to, fromMonth: monthTo, toMonth: monthFrom }
-  }, [monthFrom, monthTo])
+    return { from: toRange.from, to: fromRange.to, fromMonth: appliedMonthTo, toMonth: appliedMonthFrom }
+  }, [appliedMonthFrom, appliedMonthTo])
 
   const granularity: HistoricGranularity = useMemo(() => {
     if (!monthRange.fromMonth || !monthRange.toMonth) {
@@ -972,7 +1166,19 @@ export function useHistoricDashboard() {
     [causeCatalogMap, detailRows],
   )
 
-  const adjustedDiagnostics = useMemo(() => buildPedidoSummaries(fullRowsByContext, causeCatalogMap).diagnostics, [causeCatalogMap, fullRowsByContext])
+  const activeSessionCache = historicSessionCache?.dataVersion === dataVersion ? historicSessionCache : null
+
+  const adjustedDiagnosticsKey = useMemo(() => buildHistoricAdjustedDiagnosticsKey({
+    dataVersion,
+    sector: effectiveSector,
+    client: selectedClient,
+  }), [dataVersion, effectiveSector, selectedClient])
+
+  const adjustedDiagnostics = useMemo(() => getOrCreateHistoricAdjustedDiagnostics(
+    activeSessionCache,
+    adjustedDiagnosticsKey,
+    () => buildPedidoSummaries(fullRowsByContext, causeCatalogMap).diagnostics,
+  ), [activeSessionCache, adjustedDiagnosticsKey, causeCatalogMap, fullRowsByContext])
 
   const adjustedModeInfo = useMemo<HistoricAdjustedModeInfo>(() => {
     if (!causeCatalogSummary || !causeCatalogSummary.foundSheet) {
@@ -1059,15 +1265,75 @@ export function useHistoricDashboard() {
     }
   }, [adjustedModeInfo.enabled, indicatorMode])
 
-  const visiblePeriodData = useMemo(
-    () => buildPeriodRowData(rowsByContextFilters, granularity, effectiveIndicatorMode, causeCatalogMap),
-    [causeCatalogMap, effectiveIndicatorMode, granularity, rowsByContextFilters],
-  )
+  const derivedSnapshotKey = useMemo(() => buildHistoricDerivedSnapshotKey({
+    dataVersion,
+    periodFrom: monthRange.from,
+    periodTo: monthRange.to,
+    sector: effectiveSector,
+    client: selectedClient,
+    indicatorMode: effectiveIndicatorMode,
+    granularity,
+  }), [dataVersion, effectiveIndicatorMode, effectiveSector, granularity, monthRange.from, monthRange.to, selectedClient])
 
-  const fullPeriodData = useMemo(
-    () => buildPeriodRowData(fullRowsByContext, granularity, effectiveIndicatorMode, causeCatalogMap),
-    [causeCatalogMap, effectiveIndicatorMode, fullRowsByContext, granularity],
-  )
+  const derivedSnapshot = useMemo(() => getOrCreateHistoricDerivedSnapshot(
+    activeSessionCache,
+    derivedSnapshotKey,
+    () => {
+      const visiblePeriodData = buildPeriodRowData(rowsByContextFilters, granularity, effectiveIndicatorMode, causeCatalogMap)
+      const fullPeriodData = buildPeriodRowData(fullRowsByContext, granularity, effectiveIndicatorMode, causeCatalogMap)
+      const totalSummary = summarizeRows(rowsByContextFilters, effectiveIndicatorMode, causeCatalogMap)
+      const agroRows = rowsByContextFilters.filter((row) => readSector(row) === 'AGRO')
+      const domesticoRows = rowsByContextFilters.filter((row) => readSector(row) === 'DOMESTICO')
+      const agroSummary = summarizeRows(agroRows, effectiveIndicatorMode, causeCatalogMap)
+      const domesticoSummary = summarizeRows(domesticoRows, effectiveIndicatorMode, causeCatalogMap)
+
+      const part = (value: number, total: number) => (total > 0 ? (value / total) * 100 : 0)
+
+      return {
+        visiblePeriodData,
+        fullPeriodData,
+        totalSummary,
+        sectorSummary: [
+          {
+            label: 'TM PROGRAMADAS',
+            totalValue: totalSummary.tmProgramadas,
+            agroValue: agroSummary.tmProgramadas,
+            domesticoValue: domesticoSummary.tmProgramadas,
+            agroPartPct: part(agroSummary.tmProgramadas, totalSummary.tmProgramadas),
+            domesticoPartPct: part(domesticoSummary.tmProgramadas, totalSummary.tmProgramadas),
+          },
+          {
+            label: 'TM DESPACHADAS',
+            totalValue: totalSummary.tmDespachadas,
+            agroValue: agroSummary.tmDespachadas,
+            domesticoValue: domesticoSummary.tmDespachadas,
+            agroPartPct: part(agroSummary.tmDespachadas, totalSummary.tmDespachadas),
+            domesticoPartPct: part(domesticoSummary.tmDespachadas, totalSummary.tmDespachadas),
+          },
+          {
+            label: 'TM PENDIENTES',
+            totalValue: totalSummary.tmPendientes,
+            agroValue: agroSummary.tmPendientes,
+            domesticoValue: domesticoSummary.tmPendientes,
+            agroPartPct: part(agroSummary.tmPendientes, totalSummary.tmPendientes),
+            domesticoPartPct: part(domesticoSummary.tmPendientes, totalSummary.tmPendientes),
+          },
+          {
+            label: '% CUMPLIMIENTO',
+            totalValue: totalSummary.complianceTmPct,
+            agroValue: agroSummary.complianceTmPct,
+            domesticoValue: domesticoSummary.complianceTmPct,
+            agroPartPct: null,
+            domesticoPartPct: null,
+          },
+        ],
+      }
+    },
+  ), [activeSessionCache, causeCatalogMap, derivedSnapshotKey, effectiveIndicatorMode, fullRowsByContext, granularity, rowsByContextFilters])
+
+  const visiblePeriodData = derivedSnapshot.visiblePeriodData
+
+  const fullPeriodData = derivedSnapshot.fullPeriodData
 
   const previousComplianceByPeriod = useMemo(
     () => buildPreviousComplianceMap(fullPeriodData, visiblePeriodData[0]?.periodKey ?? null),
@@ -1081,10 +1347,7 @@ export function useHistoricDashboard() {
 
   const comparisonRowsForCharts = comparisonRows
 
-  const totalSummary = useMemo(
-    () => summarizeRows(rowsByContextFilters, effectiveIndicatorMode, causeCatalogMap),
-    [causeCatalogMap, effectiveIndicatorMode, rowsByContextFilters],
-  )
+  const totalSummary = derivedSnapshot.totalSummary
 
   const cards = useMemo<HistoricKpiCard[]>(() => [
     { title: 'Pedidos programados', mainValue: totalSummary.programmedOrders, unit: 'count' },
@@ -1106,50 +1369,7 @@ export function useHistoricDashboard() {
     totalSummary.unfulfilledOrders,
   ])
 
-  const sectorSummary = useMemo<HistoricSummaryRow[]>(() => {
-    const allSummary = totalSummary
-    const agroRows = rowsByContextFilters.filter((row) => readSector(row) === 'AGRO')
-    const domesticoRows = rowsByContextFilters.filter((row) => readSector(row) === 'DOMESTICO')
-    const agroSummary = summarizeRows(agroRows, effectiveIndicatorMode, causeCatalogMap)
-    const domesticoSummary = summarizeRows(domesticoRows, effectiveIndicatorMode, causeCatalogMap)
-
-    const part = (value: number, total: number) => (total > 0 ? (value / total) * 100 : 0)
-
-    return [
-      {
-        label: 'TM PROGRAMADAS',
-        totalValue: allSummary.tmProgramadas,
-        agroValue: agroSummary.tmProgramadas,
-        domesticoValue: domesticoSummary.tmProgramadas,
-        agroPartPct: part(agroSummary.tmProgramadas, allSummary.tmProgramadas),
-        domesticoPartPct: part(domesticoSummary.tmProgramadas, allSummary.tmProgramadas),
-      },
-      {
-        label: 'TM DESPACHADAS',
-        totalValue: allSummary.tmDespachadas,
-        agroValue: agroSummary.tmDespachadas,
-        domesticoValue: domesticoSummary.tmDespachadas,
-        agroPartPct: part(agroSummary.tmDespachadas, allSummary.tmDespachadas),
-        domesticoPartPct: part(domesticoSummary.tmDespachadas, allSummary.tmDespachadas),
-      },
-      {
-        label: 'TM PENDIENTES',
-        totalValue: allSummary.tmPendientes,
-        agroValue: agroSummary.tmPendientes,
-        domesticoValue: domesticoSummary.tmPendientes,
-        agroPartPct: part(agroSummary.tmPendientes, allSummary.tmPendientes),
-        domesticoPartPct: part(domesticoSummary.tmPendientes, allSummary.tmPendientes),
-      },
-      {
-        label: '% CUMPLIMIENTO',
-        totalValue: allSummary.complianceTmPct,
-        agroValue: agroSummary.complianceTmPct,
-        domesticoValue: domesticoSummary.complianceTmPct,
-        agroPartPct: null,
-        domesticoPartPct: null,
-      },
-    ]
-  }, [causeCatalogMap, effectiveIndicatorMode, rowsByContextFilters, totalSummary])
+  const sectorSummary = derivedSnapshot.sectorSummary
 
   const addClient = useCallback((client: string) => {
     const trimmed = client.trim()
@@ -1217,23 +1437,29 @@ export function useHistoricDashboard() {
   const resetFilters = useCallback(() => {
     setMonthFrom(defaultMonthFrom)
     setMonthTo(defaultMonthTo)
+    setAppliedMonthFrom(defaultMonthFrom)
+    setAppliedMonthTo(defaultMonthTo)
+    setPeriodValidationMessage(null)
     setSelectedSector('TODOS')
     setSelectedClient(null)
     setClientQuery('')
-  }, [defaultMonthFrom, defaultMonthTo])
+    if (defaultMonthFrom && defaultMonthTo) {
+      void loadData({ from: defaultMonthFrom, to: defaultMonthTo })
+    }
+  }, [defaultMonthFrom, defaultMonthTo, loadData])
 
   const hasActiveFilters = useMemo(() => (
-    monthFrom !== defaultMonthFrom
-    || monthTo !== defaultMonthTo
+    appliedMonthFrom !== defaultMonthFrom
+    || appliedMonthTo !== defaultMonthTo
     || selectedSector !== 'TODOS'
     || selectedClient !== null
     || clientQuery.trim().length > 0
   ), [
+    appliedMonthFrom,
+    appliedMonthTo,
     clientQuery,
     defaultMonthFrom,
     defaultMonthTo,
-    monthFrom,
-    monthTo,
     selectedClient,
     selectedSector,
   ])
@@ -1254,8 +1480,13 @@ export function useHistoricDashboard() {
     selectedSectorLabel,
     monthFrom,
     monthTo,
+    appliedMonthFrom,
+    appliedMonthTo,
     setMonthFrom,
     setMonthTo,
+    canApplyPeriod,
+    applyPeriod,
+    periodValidationMessage,
     selectedClient,
     clientQuery,
     setClientQuery,
