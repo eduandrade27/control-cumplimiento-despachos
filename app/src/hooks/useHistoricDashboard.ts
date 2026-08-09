@@ -84,6 +84,14 @@ function getOrCreateHistoricAdjustedDiagnostics(
   return diagnostics
 }
 
+function buildClientSelectionKey(selectedClients: string[]): string {
+  return selectedClients
+    .map((client) => normalizeText(client))
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right))
+    .join('|')
+}
+
 function buildHistoricDerivedSnapshotKey(params: {
   dataVersion: number
   periodFrom: string
@@ -904,7 +912,7 @@ export function useHistoricDashboard() {
   const [appliedMonthFrom, setAppliedMonthFrom] = useState('')
   const [appliedMonthTo, setAppliedMonthTo] = useState('')
   const [selectedSector, setSelectedSector] = useState<HistoricSectorFilter>('TODOS')
-  const [selectedClient, setSelectedClient] = useState<string | null>(null)
+  const [selectedClients, setSelectedClients] = useState<string[]>([])
   const [clientQuery, setClientQuery] = useState('')
   const [defaultMonthFrom, setDefaultMonthFrom] = useState('')
   const [defaultMonthTo, setDefaultMonthTo] = useState('')
@@ -1090,11 +1098,12 @@ export function useHistoricDashboard() {
   }), [detailRows, monthRange.from, monthRange.to])
 
   const selectedClientSector = useMemo<SectorValue | null>(() => {
-    if (!selectedClient) {
+    const firstSelectedClient = selectedClients[0]
+    if (!firstSelectedClient) {
       return null
     }
 
-    const normalizedClient = normalizeText(selectedClient)
+    const normalizedClient = normalizeText(firstSelectedClient)
     if (!normalizedClient) {
       return null
     }
@@ -1111,7 +1120,7 @@ export function useHistoricDashboard() {
     }
 
     return null
-  }, [detailRows, selectedClient])
+  }, [detailRows, selectedClients])
 
   const effectiveSector = selectedClientSector ?? selectedSector
 
@@ -1124,12 +1133,13 @@ export function useHistoricDashboard() {
   }, [effectiveSector, rowsByTemporalScope])
 
   const rowsByContextFilters = useMemo(() => rowsBySectorScope.filter((row) => {
-    if (!selectedClient) {
+    if (selectedClients.length === 0) {
       return true
     }
 
-    return normalizeText(readClient(row)) === normalizeText(selectedClient)
-  }), [rowsBySectorScope, selectedClient])
+    const selectedClientSet = new Set(selectedClients.map((client) => normalizeText(client)).filter(Boolean))
+    return selectedClientSet.has(normalizeText(readClient(row)))
+  }), [rowsBySectorScope, selectedClients])
 
   const fullRowsBySector = useMemo(() => {
     if (effectiveSector === 'TODOS') {
@@ -1140,25 +1150,29 @@ export function useHistoricDashboard() {
   }, [detailRows, effectiveSector])
 
   const fullRowsByContext = useMemo(() => fullRowsBySector.filter((row) => {
-    if (!selectedClient) {
+    if (selectedClients.length === 0) {
       return true
     }
 
-    return normalizeText(readClient(row)) === normalizeText(selectedClient)
-  }), [fullRowsBySector, selectedClient])
+    const selectedClientSet = new Set(selectedClients.map((client) => normalizeText(client)).filter(Boolean))
+    return selectedClientSet.has(normalizeText(readClient(row)))
+  }), [fullRowsBySector, selectedClients])
 
   const availableClients = useMemo(() => listUniqueOptions(rowsBySectorScope, readClient), [rowsBySectorScope])
 
   const matchingClients = useMemo(() => {
     const normalizedQuery = normalizeText(clientQuery)
-    const selectable = availableClients.filter((client) => client !== selectedClient)
+    const selectedSet = new Set(selectedClients.map((client) => normalizeText(client)).filter(Boolean))
+    const selectable = availableClients.filter((client) => !selectedSet.has(normalizeText(client)))
 
     if (!normalizedQuery) {
       return selectable.slice(0, 8)
     }
 
     return selectable.filter((client) => normalizeText(client).includes(normalizedQuery)).slice(0, 8)
-  }, [availableClients, clientQuery, selectedClient])
+  }, [availableClients, clientQuery, selectedClients])
+
+  const selectedClientsKey = useMemo(() => buildClientSelectionKey(selectedClients), [selectedClients])
 
   const causeCatalogMap = useMemo(() => buildCauseCatalogMap(causeCatalogSummary), [causeCatalogSummary])
   const realMatchedCauseCount = useMemo(
@@ -1171,8 +1185,8 @@ export function useHistoricDashboard() {
   const adjustedDiagnosticsKey = useMemo(() => buildHistoricAdjustedDiagnosticsKey({
     dataVersion,
     sector: effectiveSector,
-    client: selectedClient,
-  }), [dataVersion, effectiveSector, selectedClient])
+    client: selectedClientsKey,
+  }), [dataVersion, effectiveSector, selectedClientsKey])
 
   const adjustedDiagnostics = useMemo(() => getOrCreateHistoricAdjustedDiagnostics(
     activeSessionCache,
@@ -1270,10 +1284,10 @@ export function useHistoricDashboard() {
     periodFrom: monthRange.from,
     periodTo: monthRange.to,
     sector: effectiveSector,
-    client: selectedClient,
+    client: selectedClientsKey,
     indicatorMode: effectiveIndicatorMode,
     granularity,
-  }), [dataVersion, effectiveIndicatorMode, effectiveSector, granularity, monthRange.from, monthRange.to, selectedClient])
+  }), [dataVersion, effectiveIndicatorMode, effectiveSector, granularity, monthRange.from, monthRange.to, selectedClientsKey])
 
   const derivedSnapshot = useMemo(() => getOrCreateHistoricDerivedSnapshot(
     activeSessionCache,
@@ -1377,8 +1391,19 @@ export function useHistoricDashboard() {
       return
     }
 
-    setSelectedClient(trimmed)
+    setSelectedClients((current) => {
+      if (current.some((item) => normalizeText(item) === normalizeText(trimmed))) {
+        return current
+      }
+
+      return [...current, trimmed]
+    })
     setClientQuery('')
+
+    if (selectedClients.length > 0) {
+      return
+    }
+
     const normalizedClient = normalizeText(trimmed)
     if (!normalizedClient) {
       return
@@ -1389,21 +1414,35 @@ export function useHistoricDashboard() {
     if (clientSector) {
       setSelectedSector(clientSector)
     }
-  }, [detailRows])
+  }, [detailRows, selectedClients.length])
 
-  const removeClient = useCallback(() => {
-    setSelectedClient(null)
-    setSelectedSector('TODOS')
+  const removeClient = useCallback((clientName: string) => {
+    const normalizedClient = normalizeText(clientName)
+
+    setSelectedClients((current) => {
+      const next = current.filter((item) => normalizeText(item) !== normalizedClient)
+
+      if (next.length === 0) {
+        setSelectedSector('TODOS')
+      }
+
+      return next
+    })
   }, [])
 
   useEffect(() => {
-    if (!selectedClient) {
+    if (selectedClients.length === 0) {
       return
     }
 
-    const existsInScope = rowsByTemporalScope.some((row) => normalizeText(readClient(row)) === normalizeText(selectedClient))
-    if (!existsInScope) {
-      setSelectedClient(null)
+    const availableClientSet = new Set(rowsByTemporalScope.map((row) => normalizeText(readClient(row))).filter(Boolean))
+    const validClients = selectedClients.filter((client) => availableClientSet.has(normalizeText(client)))
+
+    if (validClients.length !== selectedClients.length) {
+      setSelectedClients(validClients)
+    }
+
+    if (validClients.length === 0) {
       setSelectedSector('TODOS')
       setClientQuery('')
       return
@@ -1412,27 +1451,32 @@ export function useHistoricDashboard() {
     if (selectedClientSector && selectedSector !== selectedClientSector) {
       setSelectedSector(selectedClientSector)
     }
-  }, [rowsByTemporalScope, selectedClient, selectedClientSector, selectedSector])
+  }, [rowsByTemporalScope, selectedClients, selectedClientSector, selectedSector])
 
   useEffect(() => {
-    if (!selectedClient) {
+    if (selectedClients.length === 0) {
       return
     }
 
-    const stillAvailable = availableClients.some((client) => normalizeText(client) === normalizeText(selectedClient))
-    if (!stillAvailable) {
-      setSelectedClient(null)
+    const availableClientSet = new Set(availableClients.map((client) => normalizeText(client)).filter(Boolean))
+    const validClients = selectedClients.filter((client) => availableClientSet.has(normalizeText(client)))
+
+    if (validClients.length !== selectedClients.length) {
+      setSelectedClients(validClients)
+    }
+
+    if (validClients.length === 0) {
       setSelectedSector('TODOS')
     }
-  }, [availableClients, selectedClient])
+  }, [availableClients, selectedClients])
 
   const handleSectorChange = useCallback((sector: HistoricSectorFilter) => {
-    if (selectedClient) {
+    if (selectedClients.length > 0) {
       return
     }
 
     setSelectedSector(sector)
-  }, [selectedClient])
+  }, [selectedClients.length])
 
   const resetFilters = useCallback(() => {
     setMonthFrom(defaultMonthFrom)
@@ -1441,7 +1485,7 @@ export function useHistoricDashboard() {
     setAppliedMonthTo(defaultMonthTo)
     setPeriodValidationMessage(null)
     setSelectedSector('TODOS')
-    setSelectedClient(null)
+    setSelectedClients([])
     setClientQuery('')
     if (defaultMonthFrom && defaultMonthTo) {
       void loadData({ from: defaultMonthFrom, to: defaultMonthTo })
@@ -1452,7 +1496,7 @@ export function useHistoricDashboard() {
     appliedMonthFrom !== defaultMonthFrom
     || appliedMonthTo !== defaultMonthTo
     || selectedSector !== 'TODOS'
-    || selectedClient !== null
+    || selectedClients.length > 0
     || clientQuery.trim().length > 0
   ), [
     appliedMonthFrom,
@@ -1460,7 +1504,7 @@ export function useHistoricDashboard() {
     clientQuery,
     defaultMonthFrom,
     defaultMonthTo,
-    selectedClient,
+    selectedClients.length,
     selectedSector,
   ])
 
@@ -1487,7 +1531,7 @@ export function useHistoricDashboard() {
     canApplyPeriod,
     applyPeriod,
     periodValidationMessage,
-    selectedClient,
+    selectedClients,
     clientQuery,
     setClientQuery,
     matchingClients,

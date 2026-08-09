@@ -41,6 +41,22 @@ function buildAdjustedTooltip(
   return `Pedidos excluidos del indicador: ${excludedOrders}\n\nPor causa:\n${lines}`
 }
 
+function formatHistoricMonthLabel(value: string): string {
+  if (!/^\d{4}-\d{2}$/.test(value)) {
+    return ''
+  }
+
+  const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+  const [year, month] = value.split('-')
+  const monthIndex = Number(month) - 1
+
+  if (!Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+    return value
+  }
+
+  return `${months[monthIndex]} ${year}`
+}
+
 export function HistoricPage() {
   const {
     status,
@@ -61,23 +77,23 @@ export function HistoricPage() {
     canApplyPeriod,
     applyPeriod,
     periodValidationMessage,
-    selectedClient,
+    selectedClients,
     clientQuery,
     setClientQuery,
     matchingClients,
     addClient,
     removeClient,
     setSelectedSector,
-    hasActiveFilters,
-    resetFilters,
     isEmptyData,
     isClientSectorLocked,
   } = useHistoricDashboard()
 
   const [highlightedPeriodKey, setHighlightedPeriodKey] = useState<string | null>(null)
-  const showTotalSummary = selectedSector === 'TODOS' && !selectedClient
+  const showTotalSummary = selectedSector === 'TODOS' && selectedClients.length === 0
   const summaryColumnLabel = selectedSector === 'AGRO' ? 'AGRO' : 'DOMÉSTICO'
-  const summarySubtitle = selectedClient ? `${selectedSectorLabel} · Cliente: ${selectedClient}` : selectedSectorLabel
+  const summarySubtitle = selectedClients.length > 0
+    ? `${selectedSectorLabel} · Clientes: ${selectedClients.join(', ')}`
+    : selectedSectorLabel
 
   return (
     <section className="page-card historic-page">
@@ -85,40 +101,47 @@ export function HistoricPage() {
         <div className="historic-page__headline">
           <p className="operational-page__eyebrow">Módulo histórico</p>
           <h2>Histórico ejecutivo</h2>
-          <p>Analiza la evolución de cumplimiento y el desempeño por período.</p>
+          <p>
+            Analiza la evolución de cumplimiento
+            <br />
+            y el desempeño por período.
+          </p>
         </div>
 
         <div className="historic-page__compact-filters">
           <div className="historic-page__filter-item">
-            <span className="operational-page__label">Desde (Mes/Año)</span>
-            <input
-              type="month"
-              className="operational-page__year-select"
-              value={monthFrom}
-              onChange={(event) => setMonthFrom(event.target.value)}
-              aria-label="Desde mes y año"
-            />
+            <span className="operational-page__label">Desde</span>
+            <label className="historic-page__month-field">
+              <input
+                type="month"
+                className="operational-page__year-select historic-page__month-input"
+                value={monthFrom}
+                onChange={(event) => setMonthFrom(event.target.value)}
+                aria-label="Desde mes y año"
+              />
+              <span className="historic-page__month-display" aria-hidden="true">{formatHistoricMonthLabel(monthFrom)}</span>
+            </label>
           </div>
 
           <div className="historic-page__filter-item">
-            <span className="operational-page__label">Hasta (Mes/Año)</span>
-            <input
-              type="month"
-              className="operational-page__year-select"
-              value={monthTo}
-              onChange={(event) => setMonthTo(event.target.value)}
-              aria-label="Hasta mes y año"
-            />
-          </div>
-
-          <div className="historic-page__filter-item historic-page__filter-item--action">
+            <span className="operational-page__label">Hasta</span>
+            <label className="historic-page__month-field">
+              <input
+                type="month"
+                className="operational-page__year-select historic-page__month-input"
+                value={monthTo}
+                onChange={(event) => setMonthTo(event.target.value)}
+                aria-label="Hasta mes y año"
+              />
+              <span className="historic-page__month-display" aria-hidden="true">{formatHistoricMonthLabel(monthTo)}</span>
+            </label>
             <button
               type="button"
-              className="operational-page__reset operational-page__reset--compact"
+              className="operational-page__reset operational-page__reset--compact historic-page__apply-button historic-page__apply-button--below"
               onClick={() => void applyPeriod()}
               disabled={!canApplyPeriod}
             >
-              Aplicar período
+              Aplicar
             </button>
           </div>
 
@@ -176,30 +199,20 @@ export function HistoricPage() {
               )}
 
               <div className="operational-page__chip-list" role="list">
-                {!selectedClient && <span className="operational-page__empty-state operational-page__empty-state--client">Sin cliente seleccionado</span>}
-                {selectedClient && (
+                {selectedClients.length === 0 && <span className="operational-page__empty-state operational-page__empty-state--client">Sin cliente seleccionado</span>}
+                {selectedClients.map((client) => (
                   <button
+                    key={client}
                     type="button"
                     className="operational-page__chip operational-page__chip--removable"
-                    onClick={() => removeClient()}
+                    onClick={() => removeClient(client)}
                   >
-                    {selectedClient}
+                    {client}
                     <span aria-hidden="true">×</span>
                   </button>
-                )}
+                ))}
               </div>
             </div>
-          </div>
-
-          <div className="historic-page__filter-item historic-page__filter-item--action">
-            <button
-              type="button"
-              className="operational-page__reset operational-page__reset--compact"
-              onClick={resetFilters}
-              disabled={!hasActiveFilters}
-            >
-              Limpiar
-            </button>
           </div>
         </div>
         {periodValidationMessage && (

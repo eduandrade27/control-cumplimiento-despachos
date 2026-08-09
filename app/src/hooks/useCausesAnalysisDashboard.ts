@@ -364,20 +364,6 @@ function aggregateRowsByCause(
   }
 }
 
-function matchesClient(row: DashboardRow, selectedClients: string[]): boolean {
-  if (selectedClients.length === 0) {
-    return true
-  }
-
-  const client = normalizeText(readClientName(row))
-  if (!client) {
-    return false
-  }
-
-  const selected = new Set(selectedClients.map((value) => normalizeText(value)).filter(Boolean))
-  return selected.has(client)
-}
-
 function matchesSector(row: DashboardRow, selectedSector: CausesSectorFilter): boolean {
   if (selectedSector === 'TODOS') {
     return true
@@ -388,6 +374,10 @@ function matchesSector(row: DashboardRow, selectedSector: CausesSectorFilter): b
 
 function getCauseIdentity(value: string): string {
   return normalizeCauseComparisonToken(value) || normalizeText(value)
+}
+
+function buildNormalizedClientSet(selectedClients: string[]): Set<string> {
+  return new Set(selectedClients.map((value) => normalizeText(value)).filter(Boolean))
 }
 
 export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAnalysisHookResult {
@@ -495,29 +485,66 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
     return selectedMonths.filter((month) => validMonthSet.has(month))
   }, [availableMonths, selectedMonths, selectedYear])
 
-  const filteredRowsByMainFilters = useMemo(() => {
-    const byMonths = filterRowsBySelectedMonths(causeRows, effectiveSelectedMonths)
+  const selectedClientSector = useMemo<CausesSectorFilter | null>(() => {
+    const firstSelectedClient = selectedClients[0]
+    if (!firstSelectedClient) {
+      return null
+    }
 
-    return byMonths.filter((row) => {
-      if (!matchesClient(row, selectedClients)) {
-        return false
+    const normalizedClient = normalizeText(firstSelectedClient)
+    if (!normalizedClient) {
+      return null
+    }
+
+    for (const row of detailRows) {
+      if (normalizeText(readClientName(row)) !== normalizedClient) {
+        continue
       }
 
-      return matchesSector(row, selectedSector)
+      const sector = readSector(row)
+      if (sector && sector !== 'TODOS') {
+        return sector
+      }
+    }
+
+    return null
+  }, [detailRows, selectedClients])
+
+  const effectiveSector = selectedClientSector ?? selectedSector
+
+  const selectedClientSet = useMemo(() => buildNormalizedClientSet(selectedClients), [selectedClients])
+
+  const filteredRowsByScope = useMemo(() => {
+    const byMonths = filterRowsBySelectedMonths(causeRows, effectiveSelectedMonths)
+    return byMonths.filter((row) => matchesSector(row, effectiveSector))
+  }, [causeRows, effectiveSelectedMonths, effectiveSector])
+
+  const filteredRowsByMainFilters = useMemo(() => {
+    if (selectedClientSet.size === 0) {
+      return filteredRowsByScope
+    }
+
+    return filteredRowsByScope.filter((row) => {
+      const client = normalizeText(readClientName(row))
+      return client ? selectedClientSet.has(client) : false
     })
-  }, [causeRows, effectiveSelectedMonths, selectedClients, selectedSector])
+  }, [filteredRowsByScope, selectedClientSet])
+
+  const filteredDetailRowsByScope = useMemo(() => {
+    const byMonths = filterRowsBySelectedMonths(detailRows, effectiveSelectedMonths)
+    return byMonths.filter((row) => matchesSector(row, effectiveSector))
+  }, [detailRows, effectiveSelectedMonths, effectiveSector])
 
   const filteredDetailRowsByMainFilters = useMemo(() => {
-    const byMonths = filterRowsBySelectedMonths(detailRows, effectiveSelectedMonths)
+    if (selectedClientSet.size === 0) {
+      return filteredDetailRowsByScope
+    }
 
-    return byMonths.filter((row) => {
-      if (!matchesClient(row, selectedClients)) {
-        return false
-      }
-
-      return matchesSector(row, selectedSector)
+    return filteredDetailRowsByScope.filter((row) => {
+      const client = normalizeText(readClientName(row))
+      return client ? selectedClientSet.has(client) : false
     })
-  }, [detailRows, effectiveSelectedMonths, selectedClients, selectedSector])
+  }, [filteredDetailRowsByScope, selectedClientSet])
 
   const causeCatalogMap = useMemo(() => buildCauseCatalogMap(causeCatalogSummary), [causeCatalogSummary])
   const rowsForGlobalMatch = useMemo(
@@ -656,12 +683,13 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
 
     return yearMonths.map((month) => {
       const monthRows = filterRowsBySelectedMonths(causeRows, [month.value]).filter((row) => {
-        if (!matchesClient(row, selectedClients)) {
+        if (!matchesSector(row, effectiveSector)) {
           return false
         }
 
-        if (selectedSector !== 'TODOS') {
-          return readSector(row) === selectedSector
+        if (selectedClientSet.size > 0) {
+          const client = normalizeText(readClientName(row))
+          return client ? selectedClientSet.has(client) : false
         }
 
         return true
@@ -678,19 +706,20 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
         rows: monthVisibleRows,
       }
     })
-  }, [availableMonths, causeCatalogMap, causeRows, effectiveMode, selectedClients, selectedSector, selectedYear])
+  }, [availableMonths, causeCatalogMap, causeRows, effectiveMode, effectiveSector, selectedClientSet, selectedYear])
 
   const historicalMonthSnapshots = useMemo<CausesHistoricalMonthSnapshot[]>(() => {
     const sortedMonths = [...availableMonths].sort(sortMonthsByChronology)
 
     return sortedMonths.map((month) => {
       const monthRows = filterRowsBySelectedMonths(causeRows, [month.value]).filter((row) => {
-        if (!matchesClient(row, selectedClients)) {
+        if (!matchesSector(row, effectiveSector)) {
           return false
         }
 
-        if (selectedSector !== 'TODOS') {
-          return readSector(row) === selectedSector
+        if (selectedClientSet.size > 0) {
+          const client = normalizeText(readClientName(row))
+          return client ? selectedClientSet.has(client) : false
         }
 
         return true
@@ -707,9 +736,23 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
         rows: monthVisibleRows,
       }
     })
-  }, [availableMonths, causeCatalogMap, causeRows, effectiveMode, selectedClients, selectedSector])
+  }, [availableMonths, causeCatalogMap, causeRows, effectiveMode, effectiveSector, selectedClientSet])
 
-  const availableClients = useMemo(() => buildAvailableClients(filteredRowsByMainFilters), [filteredRowsByMainFilters])
+  const availableClients = useMemo(() => buildAvailableClients(filteredRowsByScope), [filteredRowsByScope])
+
+  useEffect(() => {
+    if (selectedClientSector && selectedSector !== selectedClientSector) {
+      setSelectedSector(selectedClientSector)
+    }
+  }, [selectedClientSector, selectedSector])
+
+  const handleSectorChange = useCallback((sector: CausesSectorFilter) => {
+    if (selectedClients.length > 0) {
+      return
+    }
+
+    setSelectedSector(sector)
+  }, [selectedClients.length])
 
   const changeYear = useCallback((year: number) => {
     setSelectedYear(year)
@@ -740,10 +783,10 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
 
     return hasYearChange
       || hasMonthChange
-      || selectedSector !== 'TODOS'
+        || effectiveSector !== 'TODOS'
       || effectiveMode !== 'BRUTO'
       || selectedClients.length > 0
-  }, [defaultMonths, defaultYear, effectiveMode, selectedClients.length, selectedMonths, selectedSector, selectedYear])
+      }, [defaultMonths, defaultYear, effectiveMode, effectiveSector, selectedClients.length, selectedMonths, selectedYear])
 
   const totalsByVisibleRows = useMemo(() => {
     return visibleRows.reduce((acc, row) => {
@@ -764,7 +807,7 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
     availableYears,
     selectedYear,
     selectedMonths: effectiveSelectedMonths,
-    selectedSector,
+    selectedSector: effectiveSector,
     indicatorMode: effectiveMode,
     adjustedModeInfo,
     availableClients,
@@ -775,7 +818,7 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
     hasActiveFilters,
     changeYear,
     toggleMonth,
-    setSelectedSector,
+    setSelectedSector: handleSectorChange,
     setIndicatorMode,
     resetFilters,
   }
