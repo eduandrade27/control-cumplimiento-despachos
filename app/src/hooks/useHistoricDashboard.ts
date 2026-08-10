@@ -9,6 +9,7 @@ import {
   readProgrammedTm,
   readCauseName,
   readTextValue,
+  isSeguimientoWithEmptyCause,
 } from '../lib/operationalDetail'
 import { loadCauseCatalogSummary, normalizeCauseComparisonToken } from '../lib/excel'
 import { subscribeToSupabaseRefresh } from '../lib/refreshEvents'
@@ -414,6 +415,10 @@ function readStatus(row: DashboardRow): string {
 }
 
 function isUnfulfilledStatus(row: DashboardRow): boolean {
+  if (isSeguimientoWithEmptyCause(row)) {
+    return false
+  }
+
   const status = readStatus(row)
   return status.includes('seguimiento') || status.includes('incumpl')
 }

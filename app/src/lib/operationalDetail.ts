@@ -190,6 +190,15 @@ export function getPedidoEvaluationStatus(row: OperationalDetailRow): PedidoEval
   return isIncumplidoRow(row) ? 'UNFULFILLED' : 'FULFILLED'
 }
 
+export function isSeguimientoWithEmptyCause(row: OperationalDetailRow): boolean {
+  const statusText = normalizeText(readTextValue(row, ['estado', 'estado_pedido', 'status', 'estatus', 'seguimiento']))
+  if (!statusText.includes('seguimiento')) {
+    return false
+  }
+
+  return isBlankOrValue(readCauseName(row), 'Sin causa')
+}
+
 export function isBlankOrValue(value: unknown, invalidValue: string): boolean {
   const normalized = normalizeText(value)
   return !normalized || normalized === normalizeText(invalidValue)
@@ -241,6 +250,10 @@ export function applyCrossFilters<T extends OperationalDetailRow>(rows: T[], cro
 }
 
 export function isIncumplidoRow(row: OperationalDetailRow): boolean {
+  if (isSeguimientoWithEmptyCause(row)) {
+    return false
+  }
+
   if ((readNumericValue(row, ['pedidos_incumplidos', 'incumplidos']) ?? 0) > 0) {
     return true
   }

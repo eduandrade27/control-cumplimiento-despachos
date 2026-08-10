@@ -1,4 +1,4 @@
-import { aggregatePedidos, buildPedidoKey, filterRowsBySelectedMonths, getDateKey, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readClientName, readCauseName, readPendingTm } from '../lib/operationalDetail'
+import { aggregatePedidos, buildLineKey, buildPedidoKey, filterRowsBySelectedMonths, getDateKey, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readAreaName, readClientName, readCauseName, readPendingTm } from '../lib/operationalDetail'
 import { fetchOperationalBaseData } from './operationalDataCache'
 import type { OperationalInsightCrossFilter, OperationalInsightRow, OperationalInsightsData, OperationalInsightSeriesPoint, OperationalTopRow } from '../types/operationalInsights'
 
@@ -38,6 +38,64 @@ function intersectKeySets(sets: Set<string>[]): Set<string> {
   }
 
   return intersection
+}
+
+function buildCauseAreaMap(causeRows: OperationalInsightRow[], areaRows: OperationalInsightRow[]): Map<string, string> {
+  const areaByLine = new Map<string, string>()
+  const areaByPedido = new Map<string, Set<string>>()
+
+  for (const row of areaRows) {
+    const area = readAreaName(row)?.trim()
+    const pedidoKey = buildPedidoKey(row)
+
+    if (!area || !pedidoKey) {
+      continue
+    }
+
+    const normalizedArea = normalizeText(area)
+    if (!normalizedArea) {
+      continue
+    }
+
+    const lineKey = buildLineKey(row)
+    if (lineKey) {
+      areaByLine.set(`${pedidoKey}|${lineKey}`, normalizedArea)
+    }
+
+    const currentAreas = areaByPedido.get(pedidoKey) ?? new Set<string>()
+    currentAreas.add(normalizedArea)
+    areaByPedido.set(pedidoKey, currentAreas)
+  }
+
+  const map = new Map<string, string>()
+
+  for (const row of causeRows) {
+    const cause = readCauseName(row)?.trim()
+    const pedidoKey = buildPedidoKey(row)
+    if (!cause || !pedidoKey) {
+      continue
+    }
+
+    const normalizedCause = normalizeText(cause)
+    if (!normalizedCause || map.has(normalizedCause)) {
+      continue
+    }
+
+    const lineKey = buildLineKey(row)
+    const byLine = lineKey ? areaByLine.get(`${pedidoKey}|${lineKey}`) : undefined
+
+    if (byLine) {
+      map.set(normalizedCause, byLine)
+      continue
+    }
+
+    const pedidoAreas = areaByPedido.get(pedidoKey)
+    if (pedidoAreas && pedidoAreas.size === 1) {
+      map.set(normalizedCause, Array.from(pedidoAreas)[0])
+    }
+  }
+
+  return map
 }
 
 function filterRowsByPedidoKeys(rows: OperationalInsightRow[], allowedKeys: Set<string> | null): OperationalInsightRow[] {
@@ -246,6 +304,7 @@ function buildAreaSeries(rows: OperationalInsightRow[], mode: 'incidents' | 'pen
 
 function buildSortedClientRows(rows: OperationalInsightRow[]): OperationalTopRow[] {
   const map = new Map<string, { tmPendiente: number; pedidos: Set<string> }>()
+  const pedidos = aggregatePedidos(rows)
 
   for (const row of rows) {
     const client = readClientName(row)?.trim()
@@ -254,16 +313,24 @@ function buildSortedClientRows(rows: OperationalInsightRow[]): OperationalTopRow
     }
 
     const current = map.get(client) ?? { tmPendiente: 0, pedidos: new Set<string>() }
-    const pedidoKey = buildPedidoKey(row)
-    const normalizedClient = client.toLowerCase()
 
     current.tmPendiente += Number(readPendingTm(row)) || 0
 
-    if (pedidoKey && isIncumplidoRow(row)) {
-      current.pedidos.add(`${pedidoKey}|${normalizedClient}`)
+    map.set(client, current)
+  }
+
+  for (const pedido of pedidos) {
+    const client = pedido.client?.trim()
+    if (!client || !pedido.hasGuideInformation || !pedido.isIncumplido) {
+      continue
     }
 
-    map.set(client, current)
+    const current = map.get(client)
+    if (!current) {
+      continue
+    }
+
+    current.pedidos.add(pedido.key)
   }
 
   return Array.from(map.entries())
@@ -337,6 +404,58 @@ export async function fetchOperationalInsightsData(
   const filteredPedidoRows = filterRowsByPedidoKeys(pedidoRowsForClients, allowedPedidoKeys)
   const filteredCauseRows = filterRowsByPedidoKeys(causeRowsForClients, allowedPedidoKeys)
   const filteredAreaRows = filterRowsByPedidoKeys(areaRowsForClients, allowedPedidoKeys)
+  const selectedAreaFilters = crossFilters
+    .filter((filter) => filter.key === 'area')
+    .map((filter) => normalizeText(filter.value))
+    .filter(Boolean)
+  const selectedCauseFilters = crossFilters
+    .filter((filter) => filter.key === 'causa')
+    .map((filter) => normalizeText(filter.value))
+    .filter(Boolean)
+
+  const selectedAreasSet = new Set(selectedAreaFilters)
+  const selectedCausesSet = new Set(selectedCauseFilters)
+  const causeAreaMap = buildCauseAreaMap(causeRowsForClients, areaRowsForClients)
+  const areasFromSelectedCauses = new Set(
+    selectedCauseFilters
+      .map((cause) => causeAreaMap.get(cause))
+      .filter((area): area is string => Boolean(area)),
+  )
+
+  const visibleCauseRows = filteredCauseRows.filter((row) => {
+    const causeKey = normalizeText(readCauseName(row))
+    if (!causeKey) {
+      return false
+    }
+
+    if (selectedCausesSet.size > 0 && !selectedCausesSet.has(causeKey)) {
+      return false
+    }
+
+    if (selectedAreasSet.size === 0) {
+      return true
+    }
+
+    const mappedArea = causeAreaMap.get(causeKey)
+    return Boolean(mappedArea && selectedAreasSet.has(mappedArea))
+  })
+
+  const visibleAreaRows = filteredAreaRows.filter((row) => {
+    const areaKey = normalizeText(readAreaName(row))
+    if (!areaKey) {
+      return false
+    }
+
+    if (selectedAreasSet.size > 0 && !selectedAreasSet.has(areaKey)) {
+      return false
+    }
+
+    if (selectedCausesSet.size === 0) {
+      return true
+    }
+
+    return areasFromSelectedCauses.has(areaKey)
+  })
   const { temporalSeries, volumeSeries } = buildDailySeries(filteredPedidoRows)
   const incumplimientosSeries = buildIncumplimientosSeries(filteredPedidoRows)
 
@@ -344,9 +463,9 @@ export async function fetchOperationalInsightsData(
     temporalSeries,
     incumplimientosSeries,
     volumeSeries,
-    areaIncidents: buildAreaSeries(filteredAreaRows, 'incidents'),
-    areaPendingTm: buildAreaSeries(filteredAreaRows, 'pending'),
-    topCauseRows: buildTopCauseRows(filteredCauseRows),
+    areaIncidents: buildAreaSeries(visibleAreaRows, 'incidents'),
+    areaPendingTm: buildAreaSeries(visibleAreaRows, 'pending'),
+    topCauseRows: buildTopCauseRows(visibleCauseRows),
     topClientRows: buildTopClientRows(filteredPedidoRows),
     fullCauseRows: buildSortedCauseRows(filteredCauseRows),
     fullClientRows: buildSortedClientRows(filteredPedidoRows),
