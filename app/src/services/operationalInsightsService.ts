@@ -1,4 +1,4 @@
-import { aggregatePedidos, buildLineKey, buildPedidoKey, filterRowsBySelectedMonths, getDateKey, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readAreaName, readClientName, readCauseName, readPendingTm } from '../lib/operationalDetail'
+import { aggregatePedidos, buildLineKey, buildPedidoKey, filterRowsBySelectedMonths, getDateKey, isBlankOrValue, isIncumplidoRow, isSeguimientoWithEmptyCause, matchesSelectedClients, normalizeText, readAreaName, readClientName, readCauseName, readPendingTm } from '../lib/operationalDetail'
 import { fetchOperationalBaseData } from './operationalDataCache'
 import type { OperationalInsightCrossFilter, OperationalInsightRow, OperationalInsightsData, OperationalInsightSeriesPoint, OperationalTopRow } from '../types/operationalInsights'
 
@@ -133,54 +133,81 @@ function buildRolling30DayRange(endDateKey: string): { startDate: string; endDat
   }
 }
 
-function buildDailySeries(rows: OperationalInsightRow[]): { temporalSeries: OperationalInsightSeriesPoint[]; volumeSeries: OperationalInsightSeriesPoint[] } {
-  const latestDateKey = rows.reduce<string | null>((latest, row) => {
+function buildRolling30DayRangeToYesterday(): { startDate: string; endDate: string } {
+  const now = new Date()
+  const endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
+  const startDate = new Date(endDate)
+  startDate.setUTCDate(startDate.getUTCDate() - 29)
+
+  return {
+    startDate: startDate.toISOString().slice(0, 10),
+    endDate: endDate.toISOString().slice(0, 10),
+  }
+}
+
+function filterRowsByDateRange(rows: OperationalInsightRow[], range: { startDate: string; endDate: string }): OperationalInsightRow[] {
+  return rows.filter((row) => {
     const dateKey = getDateKey(row.fecha)
-    if (!dateKey) {
-      return latest
-    }
+    return dateKey ? dateKey >= range.startDate && dateKey <= range.endDate : false
+  })
+}
 
-    return !latest || dateKey > latest ? dateKey : latest
-  }, null)
+function buildDailySeries(rows: OperationalInsightRow[]): { temporalSeries: OperationalInsightSeriesPoint[]; volumeSeries: OperationalInsightSeriesPoint[] } {
+  const rollingRange = buildRolling30DayRangeToYesterday()
+  const rollingRows = filterRowsByDateRange(rows, rollingRange)
 
-  if (!latestDateKey) {
+  if (rollingRows.length === 0) {
     return { temporalSeries: [], volumeSeries: [] }
   }
 
-  const rollingRange = buildRolling30DayRange(latestDateKey)
-  const rollingRows = rows.filter((row) => {
-    const dateKey = getDateKey(row.fecha)
-    return dateKey ? dateKey >= rollingRange.startDate && dateKey <= rollingRange.endDate : false
-  })
-  const pedidos = aggregatePedidos(rollingRows)
-  const grouped = new Map<string, { programmed: number; dispatched: number; fulfilled: number; total: number }>()
+  const evaluableRows = rollingRows.filter((row) => !isSeguimientoWithEmptyCause(row))
+  const volumePedidos = aggregatePedidos(rollingRows)
+  const temporalPedidos = aggregatePedidos(evaluableRows).filter((pedido) => pedido.hasGuideInformation)
 
-  for (const pedido of pedidos) {
+  const temporalGrouped = new Map<string, { programmed: number; dispatched: number; fulfilled: number; total: number }>()
+  const volumeGrouped = new Map<string, { programmed: number; dispatched: number }>()
+
+  for (const pedido of temporalPedidos) {
     if (!pedido.dateKey) {
       continue
     }
 
-    const current = grouped.get(pedido.dateKey) ?? { programmed: 0, dispatched: 0, fulfilled: 0, total: 0 }
+    const current = temporalGrouped.get(pedido.dateKey) ?? { programmed: 0, dispatched: 0, fulfilled: 0, total: 0 }
     current.programmed += pedido.programmedTm
     current.dispatched += pedido.dispatchedTm
     current.total += 1
     current.fulfilled += pedido.isIncumplido ? 0 : 1
-    grouped.set(pedido.dateKey, current)
+    temporalGrouped.set(pedido.dateKey, current)
   }
 
-  const entries = Array.from(grouped.entries())
+  for (const pedido of volumePedidos) {
+    if (!pedido.dateKey) {
+      continue
+    }
+
+    const current = volumeGrouped.get(pedido.dateKey) ?? { programmed: 0, dispatched: 0 }
+    current.programmed += pedido.programmedTm
+    current.dispatched += pedido.dispatchedTm
+    volumeGrouped.set(pedido.dateKey, current)
+  }
+
+  const temporalEntries = Array.from(temporalGrouped.entries())
+    .filter(([, values]) => values.programmed > 0)
+    .sort((left, right) => left[0].localeCompare(right[0]))
+
+  const volumeEntries = Array.from(volumeGrouped.entries())
     .filter(([, values]) => values.programmed > 0)
     .sort((left, right) => left[0].localeCompare(right[0]))
 
   return {
-    temporalSeries: entries.map(([dateKey, values]) => ({
+    temporalSeries: temporalEntries.map(([dateKey, values]) => ({
       label: dateKey,
       dateKey,
       value: values.total > 0 ? (values.fulfilled / values.total) * 100 : null,
       pedidosCumplidos: values.fulfilled,
       totalPedidos: values.total,
     })),
-    volumeSeries: entries.map(([dateKey, values]) => ({
+    volumeSeries: volumeEntries.map(([dateKey, values]) => ({
       label: dateKey,
       dateKey,
       value: values.programmed,
@@ -456,7 +483,7 @@ export async function fetchOperationalInsightsData(
 
     return areasFromSelectedCauses.has(areaKey)
   })
-  const { temporalSeries, volumeSeries } = buildDailySeries(filteredPedidoRows)
+  const { temporalSeries, volumeSeries } = buildDailySeries(pedidoRows)
   const incumplimientosSeries = buildIncumplimientosSeries(filteredPedidoRows)
 
   const result = {
