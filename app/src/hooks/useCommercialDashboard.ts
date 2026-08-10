@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { buildPedidoKey, filterRowsBySelectedMonths, hasGuideInformation, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readAreaName, readCauseName, readClientName, readPendingTm, readTextValue } from '../lib/operationalDetail'
+import { buildLineKey, buildPedidoKey, filterRowsBySelectedMonths, hasGuideInformation, isBlankOrValue, isIncumplidoRow, matchesSelectedClients, normalizeText, readAreaName, readCauseName, readClientName, readPendingTm, readTextValue } from '../lib/operationalDetail'
 import { fetchCommercialDashboardData } from '../services/commercialService'
 import { useSharedDashboardFilters } from '../contexts/SharedDashboardFiltersContext'
 import type { CommercialCauseRow, CommercialDetailCauseRow, CommercialDetailRow, CommercialKpis } from '../types/commercial'
@@ -155,6 +155,65 @@ function buildPedidoKeysByArea(rows: Record<string, unknown>[]): Map<string, Set
   }
 
   return areaIndex
+}
+
+function buildCauseAreaMap(causeRows: Record<string, unknown>[], areaRows: Record<string, unknown>[]): Map<string, string> {
+  const areaByLine = new Map<string, string>()
+  const areaByPedido = new Map<string, Set<string>>()
+
+  for (const row of areaRows) {
+    const area = readAreaNameSafe(row)
+    const pedidoKey = buildPedidoKey(row)
+
+    if (!area || !pedidoKey) {
+      continue
+    }
+
+    const normalizedArea = normalizeText(area)
+    if (!normalizedArea) {
+      continue
+    }
+
+    const lineKey = buildLineKey(row)
+    if (lineKey) {
+      areaByLine.set(`${pedidoKey}|${lineKey}`, normalizedArea)
+    }
+
+    const currentAreas = areaByPedido.get(pedidoKey) ?? new Set<string>()
+    currentAreas.add(normalizedArea)
+    areaByPedido.set(pedidoKey, currentAreas)
+  }
+
+  const causeAreaMap = new Map<string, string>()
+
+  for (const row of causeRows) {
+    const cause = readCauseNameSafe(row)
+    const pedidoKey = buildPedidoKey(row)
+
+    if (!cause || !pedidoKey) {
+      continue
+    }
+
+    const normalizedCause = normalizeText(cause)
+    if (!normalizedCause || causeAreaMap.has(normalizedCause)) {
+      continue
+    }
+
+    const lineKey = buildLineKey(row)
+    const mappedAreaByLine = lineKey ? areaByLine.get(`${pedidoKey}|${lineKey}`) : undefined
+
+    if (mappedAreaByLine) {
+      causeAreaMap.set(normalizedCause, mappedAreaByLine)
+      continue
+    }
+
+    const pedidoAreas = areaByPedido.get(pedidoKey)
+    if (pedidoAreas && pedidoAreas.size === 1) {
+      causeAreaMap.set(normalizedCause, Array.from(pedidoAreas)[0])
+    }
+  }
+
+  return causeAreaMap
 }
 
 function buildCommercialKpis(rows: Record<string, unknown>[]): CommercialKpis {
@@ -430,17 +489,22 @@ export function useCommercialDashboard(selectedClients: string[], selectedArea: 
     }
 
     const normalizedArea = normalizeText(selectedArea)
-    const pedidoKeys = pedidoKeysByArea.get(normalizedArea)
-
-    if (!pedidoKeys || pedidoKeys.size === 0) {
-      return []
-    }
+    const areaRowsForMonthsAndClients = filterRowsBySelectedMonths(areaRows, selectedMonths)
+      .filter((row) => matchesSelectedClients(row, selectedClients))
+    const causeAreaMap = buildCauseAreaMap(filteredCauseRows, areaRowsForMonthsAndClients)
 
     return filteredCauseRows.filter((row) => {
-      const pedidoKey = buildPedidoKey(row)
-      return pedidoKey ? pedidoKeys.has(pedidoKey) : false
+      const cause = readCauseNameSafe(row)
+      if (!cause) {
+        return false
+      }
+
+      const causeKey = normalizeText(cause)
+      const mappedArea = causeAreaMap.get(causeKey)
+
+      return Boolean(mappedArea && mappedArea === normalizedArea)
     })
-  }, [filteredCauseRows, pedidoKeysByArea, selectedArea])
+  }, [areaRows, filteredCauseRows, selectedArea, selectedClients, selectedMonths])
 
   const kpis = useMemo(() => buildCommercialKpis(areaFilteredDetailRows), [areaFilteredDetailRows])
   const causeTableRows = useMemo(() => buildCauseRows(areaFilteredCauseRows), [areaFilteredCauseRows])
