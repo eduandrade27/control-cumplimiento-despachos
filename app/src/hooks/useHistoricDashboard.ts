@@ -735,13 +735,14 @@ function summarizeRows(
     programmedOrders += 1
     tmProgramadas += pedido.programmedTm
     tmDespachadas += pedido.dispatchedTmFromValidGuia
-    tmPendientes += pedido.pendingTm
 
     if (pedido.status === 'PENDING_EVALUATION') {
       pendingEvaluationOrders += 1
     } else if (pedido.status === 'FULFILLED') {
       fulfilledOrders += 1
+      tmPendientes += pedido.pendingTm
     } else if (pedido.status === 'UNFULFILLED') {
+      tmPendientes += pedido.pendingTm
       const shouldExcludeFromAdjusted = mode === 'AJUSTADO' && pedido.allUnfulfilledCausesAreNonAffecting
 
       if (shouldExcludeFromAdjusted) {
@@ -798,6 +799,7 @@ function summarizeRows(
     : null
   const fulfilledOrdersValue = complianceEvaluatedOrders > 0 ? fulfilledOrders : null
   const unfulfilledOrdersValue = complianceEvaluatedOrders > 0 ? unfulfilledOrders : null
+  const tmPendientesValue = complianceEvaluatedOrders > 0 ? tmPendientes : null
 
   return {
     programmedOrders,
@@ -808,7 +810,7 @@ function summarizeRows(
     complianceTmPct,
     tmProgramadas,
     tmDespachadas,
-    tmPendientes,
+    tmPendientes: tmPendientesValue,
     excludedOrdersAdjusted,
     excludedCausesAdjusted: Array.from(excludedCauseOrderCounts.values()).sort((left, right) => {
       if (right.count !== left.count) {
@@ -1306,7 +1308,13 @@ export function useHistoricDashboard() {
       const agroSummary = summarizeRows(agroRows, effectiveIndicatorMode, causeCatalogMap)
       const domesticoSummary = summarizeRows(domesticoRows, effectiveIndicatorMode, causeCatalogMap)
 
-      const part = (value: number, total: number) => (total > 0 ? (value / total) * 100 : 0)
+      const part = (value: number | null, total: number | null) => {
+        if (value === null || total === null || total <= 0) {
+          return null
+        }
+
+        return (value / total) * 100
+      }
 
       return {
         visiblePeriodData,

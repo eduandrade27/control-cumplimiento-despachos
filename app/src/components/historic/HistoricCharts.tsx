@@ -32,9 +32,9 @@ interface GroupedBarChartProps {
   thirdClassName: string
 }
 
-function asChartPercent(value: number | null, yMax: number): number {
+function asChartPercent(value: number | null, yMax: number): number | null {
   if (value === null || Number.isNaN(value)) {
-    return 0
+    return null
   }
 
   return Math.max(0, Math.min(yMax, value))
@@ -80,6 +80,29 @@ function buildLinePath(points: Array<{ x: number; y: number }>): string {
   return points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`).join(' ')
 }
 
+function buildLineSegments(points: Array<{ x: number; y: number | null }>): string[] {
+  const segments: string[] = []
+  let currentSegment: Array<{ x: number; y: number }> = []
+
+  for (const point of points) {
+    if (point.y === null) {
+      if (currentSegment.length > 1) {
+        segments.push(buildLinePath(currentSegment))
+      }
+      currentSegment = []
+      continue
+    }
+
+    currentSegment.push({ x: point.x, y: point.y })
+  }
+
+  if (currentSegment.length > 1) {
+    segments.push(buildLinePath(currentSegment))
+  }
+
+  return segments
+}
+
 function ComplianceLineChart({
   rows,
   highlightedPeriodKey,
@@ -108,10 +131,13 @@ function ComplianceLineChart({
       ordersValue: complianceOrders,
       tmValue: complianceTm,
       x,
-      ordersY: padding.top + graphHeight - (complianceOrders / yMax) * graphHeight,
-      tmY: padding.top + graphHeight - (complianceTm / yMax) * graphHeight,
+      ordersY: complianceOrders === null ? null : padding.top + graphHeight - (complianceOrders / yMax) * graphHeight,
+      tmY: complianceTm === null ? null : padding.top + graphHeight - (complianceTm / yMax) * graphHeight,
     }
   })
+
+  const orderLineSegments = buildLineSegments(points.map((point) => ({ x: point.x, y: point.ordersY })))
+  const tmLineSegments = buildLineSegments(points.map((point) => ({ x: point.x, y: point.tmY })))
 
   const yTicks = [0, 20, 40, 60, 80, 100]
 
@@ -129,8 +155,12 @@ function ComplianceLineChart({
 
       {points.length > 1 && (
         <>
-          <path d={buildLinePath(points.map((point) => ({ x: point.x, y: point.ordersY })))} className="historic-chart__line historic-chart__line--orders-compliance" />
-          <path d={buildLinePath(points.map((point) => ({ x: point.x, y: point.tmY })))} className="historic-chart__line historic-chart__line--tm-compliance" />
+          {orderLineSegments.map((segment) => (
+            <path key={`orders-${segment}`} d={segment} className="historic-chart__line historic-chart__line--orders-compliance" />
+          ))}
+          {tmLineSegments.map((segment) => (
+            <path key={`tm-${segment}`} d={segment} className="historic-chart__line historic-chart__line--tm-compliance" />
+          ))}
         </>
       )}
 
@@ -138,41 +168,45 @@ function ComplianceLineChart({
         const isHighlighted = highlightedPeriodKey === point.periodKey
         return (
           <g key={point.periodKey}>
-            <Tooltip content={`Período: ${point.label}\nCumplimiento pedidos: ${formatPercent(point.ordersValue)}`}>
-              <circle
-                cx={point.x}
-                cy={point.ordersY}
-                r={isHighlighted ? 5 : 4}
-                className={`historic-chart__dot historic-chart__dot--orders ${isHighlighted ? 'is-highlighted' : ''}`}
-                onClick={() => onSelectPeriod(point.periodKey)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    onSelectPeriod(point.periodKey)
-                  }
-                }}
-              />
-            </Tooltip>
+            {point.ordersY !== null && (
+              <Tooltip content={`Período: ${point.label}\nCumplimiento pedidos: ${formatPercent(point.ordersValue)}`}>
+                <circle
+                  cx={point.x}
+                  cy={point.ordersY}
+                  r={isHighlighted ? 5 : 4}
+                  className={`historic-chart__dot historic-chart__dot--orders ${isHighlighted ? 'is-highlighted' : ''}`}
+                  onClick={() => onSelectPeriod(point.periodKey)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelectPeriod(point.periodKey)
+                    }
+                  }}
+                />
+              </Tooltip>
+            )}
 
-            <Tooltip content={`Período: ${point.label}\nCumplimiento TM: ${formatPercent(point.tmValue)}`}>
-              <circle
-                cx={point.x}
-                cy={point.tmY}
-                r={isHighlighted ? 5 : 4}
-                className={`historic-chart__dot historic-chart__dot--tm ${isHighlighted ? 'is-highlighted' : ''}`}
-                onClick={() => onSelectPeriod(point.periodKey)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    onSelectPeriod(point.periodKey)
-                  }
-                }}
-              />
-            </Tooltip>
+            {point.tmY !== null && (
+              <Tooltip content={`Período: ${point.label}\nCumplimiento TM: ${formatPercent(point.tmValue)}`}>
+                <circle
+                  cx={point.x}
+                  cy={point.tmY}
+                  r={isHighlighted ? 5 : 4}
+                  className={`historic-chart__dot historic-chart__dot--tm ${isHighlighted ? 'is-highlighted' : ''}`}
+                  onClick={() => onSelectPeriod(point.periodKey)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelectPeriod(point.periodKey)
+                    }
+                  }}
+                />
+              </Tooltip>
+            )}
 
             {labelsToShow.has(index) && (
               <text x={point.x} y={height - 14} textAnchor="middle" className="operational-chart__x-label">{point.label}</text>
@@ -233,9 +267,9 @@ function GroupedBarChart({
 
       {rows.map((row, index) => {
         const values = [
-          { key: firstLabel, value: Number(row[firstKey]), className: firstClassName },
-          { key: secondLabel, value: Number(row[secondKey]), className: secondClassName },
-          { key: thirdLabel, value: Number(row[thirdKey]), className: thirdClassName },
+          { key: firstLabel, value: row[firstKey], className: firstClassName },
+          { key: secondLabel, value: row[secondKey], className: secondClassName },
+          { key: thirdLabel, value: row[thirdKey], className: thirdClassName },
         ]
         const innerWidth = Math.max(14, groupWidth - 10)
         const barGap = 4
@@ -247,6 +281,10 @@ function GroupedBarChart({
         return (
           <g key={row.periodKey} className={isHighlighted ? 'historic-chart__group is-highlighted' : 'historic-chart__group'}>
             {values.map((entry, valueIndex) => {
+              if (entry.value === null || Number.isNaN(entry.value)) {
+                return null
+              }
+
               const value = Math.max(0, entry.value)
               const barHeight = (value / maxValue) * graphHeight
               const x = baseX + valueIndex * (barWidth + barGap)

@@ -19,7 +19,7 @@ export interface HistoricPeriodMetrics {
   complianceTmPct: number | null
   tmProgramadas: number
   tmDespachadas: number
-  tmPendientes: number
+  tmPendientes: number | null
   excludedOrdersAdjusted: number
   excludedCausesAdjusted: Array<{
     causa: string
