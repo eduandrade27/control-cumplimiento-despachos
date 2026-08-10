@@ -2981,6 +2981,79 @@ button {
   color: var(--gray-700);
 }
 
+.admin-users__tag {
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--blue-700);
+  background: rgba(61, 127, 179, 0.1);
+}
+
+.admin-users__tag--protected {
+  color: #7a4f00;
+  background: rgba(195, 141, 0, 0.14);
+}
+
+.admin-users__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.admin-users__menu-wrapper {
+  position: relative;
+}
+
+.admin-users__menu-trigger {
+  min-width: 38px;
+  text-align: center;
+  padding-inline: 0;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.admin-users__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  box-shadow: 0 8px 22px rgba(16, 58, 99, 0.14);
+  z-index: 20;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-users__menu-item {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--blue-900);
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.admin-users__menu-item:hover:not(:disabled) {
+  background: var(--gray-100);
+}
+
+.admin-users__menu-item--danger {
+  color: #a01818;
+}
+
+.admin-users__muted-action {
+  font-size: 0.82rem;
+  color: var(--gray-700);
+}
+
 @media (max-width: 900px) {
   .app-shell {
     flex-direction: column;

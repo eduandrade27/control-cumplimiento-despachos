@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   createManagedUser,
+  deactivateManagedUser,
+  deleteManagedUser,
   listManagedUsers,
+  reactivateManagedUser,
   updateManagedUserRole,
   type ManagedUser,
   type ManagedUserRole,
 } from '../services/adminUsersService'
+import { useAuth } from '../contexts/AuthContext'
 
 interface RoleDraftByUserId {
   [userId: string]: ManagedUserRole
 }
+
+const PRINCIPAL_ADMIN_EMAIL = 'eduardo.andrade@carvimsa.com'
 
 function toRoleLabel(role: ManagedUserRole): string {
   return role === 'admin' ? 'Administrador' : 'Usuario'
@@ -24,11 +30,22 @@ function formatDateTime(value: string | null): string {
   return Number.isNaN(parsed.getTime()) ? 'Sin datos' : parsed.toLocaleString('es-ES')
 }
 
+function normalizeEmail(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
+function isPrincipalAdmin(user: ManagedUser): boolean {
+  return normalizeEmail(user.email) === PRINCIPAL_ADMIN_EMAIL
+}
+
 export function AdminUsersPanel() {
+  const { user: currentUser } = useAuth()
   const [users, setUsers] = useState<ManagedUser[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [isUpdatingRole, setIsUpdatingRole] = useState(false)
+  const [pendingActionUserId, setPendingActionUserId] = useState<string | null>(null)
+  const [openMenuUserId, setOpenMenuUserId] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
   const [newUserRole, setNewUserRole] = useState<ManagedUserRole>('user')
@@ -116,6 +133,61 @@ export function AdminUsersPanel() {
     }
   }
 
+  const handleToggleUserState = async (user: ManagedUser) => {
+    setErrorMessage('')
+    setSuccessMessage('')
+
+    const bannedUntilDate = user.bannedUntil ? new Date(user.bannedUntil) : null
+    const isBanned = Boolean(bannedUntilDate && !Number.isNaN(bannedUntilDate.getTime()) && bannedUntilDate.getTime() > Date.now())
+    const actionLabel = isBanned ? 'reactivar' : 'desactivar'
+    const confirmed = window.confirm(`¿Deseas ${actionLabel} al usuario ${user.email}?`)
+    if (!confirmed) {
+      return
+    }
+
+    setPendingActionUserId(user.id)
+
+    try {
+      if (user.isActive) {
+        await deactivateManagedUser({ userId: user.id })
+        setSuccessMessage('Usuario desactivado correctamente.')
+      } else {
+        await reactivateManagedUser({ userId: user.id })
+        setSuccessMessage('Usuario reactivado correctamente.')
+      }
+
+      await loadUsers()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'No se pudo actualizar el estado del usuario.')
+    } finally {
+      setPendingActionUserId(null)
+      setOpenMenuUserId(null)
+    }
+  }
+
+  const handleDeleteUser = async (user: ManagedUser) => {
+    setErrorMessage('')
+    setSuccessMessage('')
+
+    const confirmed = window.confirm(`¿Eliminar permanentemente al usuario ${user.email}? Esta acción no se puede deshacer.`)
+    if (!confirmed) {
+      return
+    }
+
+    setPendingActionUserId(user.id)
+
+    try {
+      await deleteManagedUser({ userId: user.id })
+      setSuccessMessage('Usuario eliminado correctamente.')
+      await loadUsers()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'No se pudo eliminar el usuario.')
+    } finally {
+      setPendingActionUserId(null)
+      setOpenMenuUserId(null)
+    }
+  }
+
   return (
     <section className="config-section" aria-labelledby="users-management-title">
       <h3 id="users-management-title">Gestión de usuarios</h3>
@@ -178,19 +250,33 @@ export function AdminUsersPanel() {
               <th>Perfil</th>
               <th>Creado</th>
               <th>Último acceso</th>
-              <th>Acción</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {sortedUsers.map((user) => {
               const selectedRole = roleDraftByUserId[user.id] ?? user.role
+              const isSelf = user.id === currentUser?.id
+              const isPrincipal = isPrincipalAdmin(user)
+              const isRoleLocked = isPrincipal
+              const isMutating = pendingActionUserId === user.id
+              const isActionProtected = isSelf || isPrincipal
+              const bannedUntilDate = user.bannedUntil ? new Date(user.bannedUntil) : null
+              const isBanned = Boolean(bannedUntilDate && !Number.isNaN(bannedUntilDate.getTime()) && bannedUntilDate.getTime() > Date.now())
+              const canReactivate = isBanned
+              const isCurrentPrincipal = isSelf && isPrincipal
 
               return (
                 <tr key={user.id}>
-                  <td>{user.email}</td>
+                  <td>
+                    {user.email}
+                    {isCurrentPrincipal ? <span className="admin-users__tag">Tu cuenta</span> : null}
+                    {isPrincipal && !isSelf ? <span className="admin-users__tag admin-users__tag--protected">Cuenta principal</span> : null}
+                  </td>
                   <td>
                     <select
                       value={selectedRole}
+                      disabled={isRoleLocked || isUpdatingRole || isMutating}
                       onChange={(event) => {
                         const value = event.target.value === 'admin' ? 'admin' : 'user'
                         setRoleDraftByUserId((current) => ({ ...current, [user.id]: value }))
@@ -204,14 +290,55 @@ export function AdminUsersPanel() {
                   <td>{formatDateTime(user.createdAt)}</td>
                   <td>{formatDateTime(user.lastSignInAt)}</td>
                   <td>
-                    <button
-                      type="button"
-                      className="operational-page__reset operational-page__reset--compact"
-                      onClick={() => void handleUpdateRole(user)}
-                      disabled={isUpdatingRole || selectedRole === user.role}
-                    >
-                      Guardar perfil
-                    </button>
+                    {isCurrentPrincipal ? (
+                      <span className="admin-users__muted-action">Tu cuenta</span>
+                    ) : isActionProtected ? (
+                      <span className="admin-users__muted-action">Sin acciones disponibles</span>
+                    ) : (
+                      <div className="admin-users__actions">
+                        <button
+                          type="button"
+                          className="operational-page__reset operational-page__reset--compact"
+                          onClick={() => void handleUpdateRole(user)}
+                          disabled={isUpdatingRole || isMutating || selectedRole === user.role}
+                        >
+                          Guardar perfil
+                        </button>
+
+                        <div className="admin-users__menu-wrapper">
+                          <button
+                            type="button"
+                            className="operational-page__reset operational-page__reset--compact admin-users__menu-trigger"
+                            aria-label={`Abrir acciones para ${user.email}`}
+                            onClick={() => setOpenMenuUserId((current) => (current === user.id ? null : user.id))}
+                            disabled={isMutating || isUpdatingRole}
+                          >
+                            ⋯
+                          </button>
+
+                          {openMenuUserId === user.id ? (
+                            <div className="admin-users__menu" role="menu">
+                              <button
+                                type="button"
+                                className="admin-users__menu-item"
+                                onClick={() => void handleToggleUserState(user)}
+                                disabled={isMutating || isUpdatingRole}
+                              >
+                                {canReactivate ? 'Reactivar' : 'Desactivar'}
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-users__menu-item admin-users__menu-item--danger"
+                                onClick={() => void handleDeleteUser(user)}
+                                disabled={isMutating || isUpdatingRole}
+                              >
+                                Eliminar usuario
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
                   </td>
                 </tr>
               )

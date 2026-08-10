@@ -2,12 +2,17 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.110.3'
 
 type ManagedUserRole = 'admin' | 'user'
 
-type Action = 'listUsers' | 'createUser' | 'updateRole'
+type Action = 'listUsers' | 'createUser' | 'updateRole' | 'deactivateUser' | 'reactivateUser' | 'deleteUser'
+
+const PRINCIPAL_ADMIN_EMAIL = 'eduardo.andrade@carvimsa.com'
+const DEACTIVATE_DURATION = '876000h'
 
 interface ManagedUser {
   id: string
   email: string
   role: ManagedUserRole
+  isActive: boolean
+  bannedUntil: string | null
   createdAt: string | null
   lastSignInAt: string | null
 }
@@ -31,18 +36,53 @@ function normalizeRole(value: unknown): ManagedUserRole {
   return value === 'admin' ? 'admin' : 'user'
 }
 
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function toIsoDate(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function isUserActive(user: Record<string, unknown>): boolean {
+  const bannedUntil = toIsoDate(user.banned_until)
+  if (!bannedUntil) {
+    return true
+  }
+
+  const bannedDate = new Date(bannedUntil)
+  if (Number.isNaN(bannedDate.getTime())) {
+    return true
+  }
+
+  return bannedDate.getTime() <= Date.now()
+}
+
+function isPrincipalAdminEmail(email: string): boolean {
+  return normalizeEmail(email) === PRINCIPAL_ADMIN_EMAIL
+}
+
 function mapUser(user: Record<string, unknown>): ManagedUser {
   const appMetadata = typeof user.app_metadata === 'object' && user.app_metadata !== null
     ? (user.app_metadata as Record<string, unknown>)
     : {}
 
+  const email = typeof user.email === 'string' ? user.email : ''
+
   return {
     id: typeof user.id === 'string' ? user.id : '',
-    email: typeof user.email === 'string' ? user.email : '',
+    email,
     role: normalizeRole(appMetadata.role),
+    isActive: isUserActive(user),
+    bannedUntil: toIsoDate(user.banned_until),
     createdAt: typeof user.created_at === 'string' ? user.created_at : null,
     lastSignInAt: typeof user.last_sign_in_at === 'string' ? user.last_sign_in_at : null,
   }
+}
+
+function isProtectedPrincipalUser(user: Record<string, unknown>): boolean {
+  const email = typeof user.email === 'string' ? user.email : ''
+  return isPrincipalAdminEmail(email)
 }
 
 Deno.serve(async (req) => {
@@ -175,6 +215,20 @@ Deno.serve(async (req) => {
         })
       }
 
+      if (existingData.user.id === callerUser.id) {
+        return jsonResponse(403, {
+          ok: false,
+          error: { message: 'No puedes modificar tu propio perfil desde este panel.' },
+        })
+      }
+
+      if (isProtectedPrincipalUser(existingData.user as unknown as Record<string, unknown>)) {
+        return jsonResponse(403, {
+          ok: false,
+          error: { message: 'La cuenta principal de administrador no puede modificarse.' },
+        })
+      }
+
       const existingMetadata = typeof existingData.user.app_metadata === 'object' && existingData.user.app_metadata !== null
         ? (existingData.user.app_metadata as Record<string, unknown>)
         : {}
@@ -197,6 +251,95 @@ Deno.serve(async (req) => {
         ok: true,
         data: {
           user: mapUser(data.user as unknown as Record<string, unknown>),
+        },
+      })
+    }
+
+    if (action === 'deactivateUser' || action === 'reactivateUser' || action === 'deleteUser') {
+      const userId = typeof body.userId === 'string' ? body.userId : ''
+
+      if (!userId) {
+        return jsonResponse(400, {
+          ok: false,
+          error: { message: 'userId es obligatorio.' },
+        })
+      }
+
+      const { data: existingData, error: existingError } = await adminClient.auth.admin.getUserById(userId)
+      if (existingError || !existingData.user) {
+        return jsonResponse(404, {
+          ok: false,
+          error: { message: existingError?.message || 'Usuario no encontrado.' },
+        })
+      }
+
+      if (existingData.user.id === callerUser.id) {
+        return jsonResponse(403, {
+          ok: false,
+          error: { message: 'No puedes ejecutar esta acción sobre tu propia cuenta.' },
+        })
+      }
+
+      if (isProtectedPrincipalUser(existingData.user as unknown as Record<string, unknown>)) {
+        return jsonResponse(403, {
+          ok: false,
+          error: { message: 'La cuenta principal de administrador está protegida.' },
+        })
+      }
+
+      if (action === 'deactivateUser') {
+        const { data, error } = await adminClient.auth.admin.updateUserById(userId, {
+          ban_duration: DEACTIVATE_DURATION,
+        })
+
+        if (error || !data.user) {
+          return jsonResponse(400, {
+            ok: false,
+            error: { message: error?.message || 'No se pudo desactivar el usuario.' },
+          })
+        }
+
+        return jsonResponse(200, {
+          ok: true,
+          data: {
+            user: mapUser(data.user as unknown as Record<string, unknown>),
+          },
+        })
+      }
+
+      if (action === 'reactivateUser') {
+        const { data, error } = await adminClient.auth.admin.updateUserById(userId, {
+          ban_duration: 'none',
+        })
+
+        if (error || !data.user) {
+          return jsonResponse(400, {
+            ok: false,
+            error: { message: error?.message || 'No se pudo reactivar el usuario.' },
+          })
+        }
+
+        return jsonResponse(200, {
+          ok: true,
+          data: {
+            user: mapUser(data.user as unknown as Record<string, unknown>),
+          },
+        })
+      }
+
+      const { error } = await adminClient.auth.admin.deleteUser(userId)
+
+      if (error) {
+        return jsonResponse(400, {
+          ok: false,
+          error: { message: error.message || 'No se pudo eliminar el usuario.' },
+        })
+      }
+
+      return jsonResponse(200, {
+        ok: true,
+        data: {
+          userId,
         },
       })
     }
