@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Tooltip } from '../components/Tooltip'
 import { HistoricCharts } from '../components/historic/HistoricCharts'
 import { useHistoricDashboard } from '../hooks/useHistoricDashboard'
@@ -65,6 +65,8 @@ export function HistoricPage() {
     comparisonRows,
     comparisonRowsForCharts,
     sectorSummary,
+    adjustedExcludedCauses,
+    adjustedExcludedOrders,
     indicatorMode,
     setIndicatorMode,
     adjustedModeInfo,
@@ -89,11 +91,50 @@ export function HistoricPage() {
   } = useHistoricDashboard()
 
   const [highlightedPeriodKey, setHighlightedPeriodKey] = useState<string | null>(null)
+  const [isModeInfoOpen, setIsModeInfoOpen] = useState(false)
+  const [isModeInfoPulsing, setIsModeInfoPulsing] = useState(false)
+  const modeInfoRef = useRef<HTMLDivElement | null>(null)
   const showTotalSummary = selectedSector === 'TODOS' && selectedClients.length === 0
   const summaryColumnLabel = selectedSector === 'AGRO' ? 'AGRO' : 'DOMÉSTICO'
   const summarySubtitle = selectedClients.length > 0
     ? `${selectedSectorLabel} · Clientes: ${selectedClients.join(', ')}`
     : selectedSectorLabel
+
+  useEffect(() => {
+    if (indicatorMode !== 'AJUSTADO') {
+      return
+    }
+
+    setIsModeInfoPulsing(true)
+    const timeoutId = window.setTimeout(() => setIsModeInfoPulsing(false), 1600)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [indicatorMode])
+
+  useEffect(() => {
+    if (!isModeInfoOpen) {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (target && modeInfoRef.current?.contains(target)) {
+        return
+      }
+
+      setIsModeInfoOpen(false)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+    }
+  }, [isModeInfoOpen])
+
+  const handleIndicatorModeChange = (nextMode: 'BRUTO' | 'AJUSTADO') => {
+    setIndicatorMode(nextMode)
+  }
 
   return (
     <section className="page-card historic-page">
@@ -259,7 +300,7 @@ export function HistoricPage() {
                   <button
                     type="button"
                     className={`historic-page__mode-option ${indicatorMode === 'BRUTO' ? 'is-active' : ''}`}
-                    onClick={() => setIndicatorMode('BRUTO')}
+                    onClick={() => handleIndicatorModeChange('BRUTO')}
                   >
                     {indicatorMode === 'BRUTO' ? '●' : '○'} Bruto
                   </button>
@@ -268,7 +309,7 @@ export function HistoricPage() {
                       <button
                         type="button"
                         className={`historic-page__mode-option ${indicatorMode === 'AJUSTADO' ? 'is-active' : ''}`}
-                        onClick={() => setIndicatorMode('AJUSTADO')}
+                        onClick={() => handleIndicatorModeChange('AJUSTADO')}
                         disabled={!adjustedModeInfo.enabled}
                       >
                         {indicatorMode === 'AJUSTADO' ? '●' : '○'} Ajustado
@@ -276,15 +317,53 @@ export function HistoricPage() {
                     </span>
                   </Tooltip>
                 </div>
-                <Tooltip content={'Bruto:\nConsidera todas las causas.\n\nAjustado:\nExcluye las causas marcadas como "No afecta al indicador".'}>
+                <div ref={modeInfoRef} className="historic-page__mode-info-shell">
                   <button
                     type="button"
-                    className="historic-page__info-icon"
+                    className={`historic-page__info-icon ${isModeInfoPulsing ? 'is-pulsing' : ''}`}
                     aria-label="Información de cálculo Bruto y Ajustado"
+                    aria-expanded={isModeInfoOpen}
+                    aria-haspopup="dialog"
+                    onClick={() => setIsModeInfoOpen((current) => !current)}
                   >
-                    i
+                    ⓘ
                   </button>
-                </Tooltip>
+
+                  {isModeInfoOpen && (
+                    <div className="historic-page__mode-popover" role="dialog" aria-label="Ayuda de modos Bruto y Ajustado">
+                      <div className="historic-page__mode-popover-section">
+                        <strong>Bruto</strong>
+                        <p>Considera todos los pedidos evaluados segun la logica actual.</p>
+                      </div>
+
+                      <div className="historic-page__mode-popover-section">
+                        <strong>Ajustado</strong>
+                        <p>Recalcula el indicador excluyendo los incumplimientos cuyas causas estan configuradas como no afectantes al indicador.</p>
+                      </div>
+
+                      <div className="historic-page__mode-popover-section">
+                        <strong>Causas excluidas en el período filtrado</strong>
+                        {adjustedExcludedCauses.length > 0 ? (
+                          <ul className="historic-page__mode-popover-list" aria-label="Causas excluidas en el periodo filtrado">
+                            {adjustedExcludedCauses.map((cause) => (
+                              <li key={cause.causa} className="historic-page__mode-popover-item">
+                                <span className="historic-page__mode-popover-cause">{cause.causa}{cause.count > 1 ? ` (${cause.count})` : ''}</span>
+                                {cause.justificacion && (
+                                  <span className="historic-page__mode-popover-note">{cause.justificacion}</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p>No hubo causas excluidas en el periodo analizado.</p>
+                        )}
+                        {adjustedExcludedOrders > 0 && (
+                          <p className="historic-page__mode-popover-footnote">Pedidos excluidos del indicador: {formatNumber(adjustedExcludedOrders)}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </header>
             {!adjustedModeInfo.enabled && (

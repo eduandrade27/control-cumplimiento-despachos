@@ -1530,6 +1530,8 @@ export function useHistoricDashboard() {
     comparisonRows,
     comparisonRowsForCharts,
     sectorSummary,
+    adjustedExcludedCauses: totalSummary.excludedCausesAdjusted,
+    adjustedExcludedOrders: totalSummary.excludedOrdersAdjusted,
     indicatorMode,
     setIndicatorMode,
     adjustedModeInfo,
