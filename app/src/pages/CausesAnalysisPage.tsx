@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Tooltip } from '../components/Tooltip'
 import { GlobalMonthFilter, GlobalYearFilter } from '../components/GlobalPeriodFilters'
 import { useCausesAnalysisDashboard } from '../hooks/useCausesAnalysisDashboard'
@@ -545,6 +545,9 @@ export function CausesAnalysisPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [selectedCause, setSelectedCause] = useState<string | null>(null)
   const [showSecondaryCauses, setShowSecondaryCauses] = useState(false)
+  const [isModeInfoOpen, setIsModeInfoOpen] = useState(false)
+  const [isModeInfoPulsing, setIsModeInfoPulsing] = useState(false)
+  const modeInfoRef = useRef<HTMLDivElement | null>(null)
 
   const {
     status,
@@ -581,6 +584,38 @@ export function CausesAnalysisPage() {
       setSelectedCause(null)
     }
   }, [rows, selectedCause])
+
+  useEffect(() => {
+    if (indicatorMode !== 'AJUSTADO') {
+      return
+    }
+
+    setIsModeInfoPulsing(true)
+    const timeoutId = window.setTimeout(() => setIsModeInfoPulsing(false), 1600)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [indicatorMode])
+
+  useEffect(() => {
+    if (!isModeInfoOpen) {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (target && modeInfoRef.current?.contains(target)) {
+        return
+      }
+
+      setIsModeInfoOpen(false)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+    }
+  }, [isModeInfoOpen])
 
   const matchingClients = useMemo(() => {
     const normalizedQuery = normalizeSearchText(clientQuery)
@@ -962,6 +997,10 @@ export function CausesAnalysisPage() {
     setSortDirection('desc')
   }
 
+  const handleIndicatorModeChange = (nextMode: CausesIndicatorMode) => {
+    setIndicatorMode(nextMode)
+  }
+
   return (
     <section className="page-card causes-analysis-page">
       <div className="operational-page__header">
@@ -1081,7 +1120,7 @@ export function CausesAnalysisPage() {
               <button
                 type="button"
                 className={`historic-page__mode-option ${indicatorMode === 'BRUTO' ? 'is-active' : ''}`}
-                onClick={() => setIndicatorMode('BRUTO' as CausesIndicatorMode)}
+                onClick={() => handleIndicatorModeChange('BRUTO' as CausesIndicatorMode)}
               >
                 {indicatorMode === 'BRUTO' ? '●' : '○'} Bruto
               </button>
@@ -1090,7 +1129,7 @@ export function CausesAnalysisPage() {
                   <button
                     type="button"
                     className={`historic-page__mode-option ${indicatorMode === 'AJUSTADO' ? 'is-active' : ''}`}
-                    onClick={() => setIndicatorMode('AJUSTADO' as CausesIndicatorMode)}
+                    onClick={() => handleIndicatorModeChange('AJUSTADO' as CausesIndicatorMode)}
                     disabled={!adjustedModeInfo.enabled}
                   >
                     {indicatorMode === 'AJUSTADO' ? '●' : '○'} Ajustado
@@ -1098,15 +1137,47 @@ export function CausesAnalysisPage() {
                 </span>
               </Tooltip>
             </div>
-            <Tooltip content={'Bruto:\nConsidera todas las causas.\n\nAjustado:\nAnaliza únicamente causas con "Afecta al indicador = Sí".'}>
+            <div ref={modeInfoRef} className="historic-page__mode-info-shell">
               <button
                 type="button"
-                className="historic-page__info-icon"
+                className={`historic-page__info-icon ${isModeInfoPulsing ? 'is-pulsing' : ''}`}
                 aria-label="Información de cálculo Bruto y Ajustado"
+                aria-expanded={isModeInfoOpen}
+                aria-haspopup="dialog"
+                onClick={() => setIsModeInfoOpen((current) => !current)}
               >
-                i
+                ⓘ
               </button>
-            </Tooltip>
+
+              {isModeInfoOpen && (
+                <div className="historic-page__mode-popover" role="dialog" aria-label="Ayuda de modos Bruto y Ajustado">
+                  <div className="historic-page__mode-popover-section">
+                    <strong>Bruto</strong>
+                    <p>Considera todos los pedidos evaluados según la lógica actual.</p>
+                  </div>
+
+                  <div className="historic-page__mode-popover-section">
+                    <strong>Ajustado</strong>
+                    <p>Recalcula el indicador excluyendo los incumplimientos cuyas causas están configuradas como no afectantes al indicador.</p>
+                  </div>
+
+                  <div className="historic-page__mode-popover-section">
+                    <strong>Causas excluidas en el período filtrado</strong>
+                    {excludedSummary.byCause.length > 0 ? (
+                      <ul className="historic-page__mode-popover-list" aria-label="Causas excluidas en el período filtrado">
+                        {excludedSummary.byCause.map((cause) => (
+                          <li key={cause.causa} className="historic-page__mode-popover-item">
+                            <span className="historic-page__mode-popover-cause">{cause.causa} ({formatNumber(cause.pedidos)})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>No hubo causas excluidas en el período analizado.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
         {!adjustedModeInfo.enabled && (
