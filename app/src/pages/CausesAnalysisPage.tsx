@@ -956,25 +956,69 @@ export function CausesAnalysisPage() {
           }
         }
       } else if (!isFullYearSelection && selectedPeriodSnapshots.length >= 2) {
-        const selectedMonthlyAverage = selectedPeriodSnapshots
-          .map((snapshot) => getImpactTm(snapshot.rows))
-          .reduce((sum, value) => sum + value, 0) / selectedPeriodSnapshots.length
+        const projectionAppliesToSelection = Boolean(
+          selectedMonthProjection
+          && selectedMonthProjection.status === 'IN_PROGRESS'
+          && selectedMonthProjection.projectedImpactTm !== null
+          && selectedMonths.includes(selectedMonthProjection.monthKey)
+        )
 
-        const yearMonthlyImpacts = sortedSnapshots.map((snapshot) => getImpactTm(snapshot.rows))
-        const annualMonthlyAverage = yearMonthlyImpacts.length > 0
-          ? yearMonthlyImpacts.reduce((sum, value) => sum + value, 0) / yearMonthlyImpacts.length
+        const selectedMonthlyImpacts = selectedPeriodSnapshots.map((snapshot) => {
+          if (
+            projectionAppliesToSelection
+            && selectedMonthProjection
+            && snapshot.monthKey === selectedMonthProjection.monthKey
+          ) {
+            return selectedMonthProjection.projectedImpactTm ?? getImpactTm(snapshot.rows)
+          }
+
+          return getImpactTm(snapshot.rows)
+        })
+
+        const selectedMonthlyAverage =
+          selectedMonthlyImpacts.reduce((sum, value) => sum + value, 0)
+          / selectedMonthlyImpacts.length
+
+        const historicalClosedSnapshots = sortedSnapshots.filter((snapshot) => {
+          return !(
+            selectedMonthProjection
+            && selectedMonthProjection.status === 'IN_PROGRESS'
+            && snapshot.monthKey === selectedMonthProjection.monthKey
+          )
+        })
+
+        const historicalMonthlyImpacts = historicalClosedSnapshots.map((snapshot) =>
+          getImpactTm(snapshot.rows)
+        )
+
+        const historicalMonthlyAverage = historicalMonthlyImpacts.length > 0
+          ? historicalMonthlyImpacts.reduce((sum, value) => sum + value, 0)
+            / historicalMonthlyImpacts.length
           : 0
 
-        const deltaVsAnnualPct = annualMonthlyAverage > 0
-          ? ((selectedMonthlyAverage - annualMonthlyAverage) / annualMonthlyAverage) * 100
+        const deltaVsHistoricalPct = historicalMonthlyAverage > 0
+          ? ((selectedMonthlyAverage - historicalMonthlyAverage) / historicalMonthlyAverage) * 100
           : 0
 
-        if (annualMonthlyAverage > 0 && selectedMonthlyAverage > annualMonthlyAverage * 1.1) {
-          recommendations.push(`En los meses evaluados, el impacto promedio mensual se ubica ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio anual. Es recomendable priorizar su seguimiento.`)
-        } else if (deltaVsAnnualPct < 0) {
-          recommendations.push(`En los meses evaluados, el impacto promedio mensual se encuentra ${formatDeltaPct(deltaVsAnnualPct)} por debajo del promedio anual, evidenciando mejora frente al histórico.`)
+        const periodPrefix = projectionAppliesToSelection
+          ? 'Considerando la proyección del mes en curso, el impacto promedio mensual del período'
+          : 'En los meses evaluados, el impacto promedio mensual'
+
+        if (
+          historicalMonthlyAverage > 0
+          && selectedMonthlyAverage > historicalMonthlyAverage * 1.1
+        ) {
+          recommendations.push(
+            `${periodPrefix} se ubica ${formatDeltaPct(deltaVsHistoricalPct)} por encima del promedio mensual histórico. Es recomendable priorizar su seguimiento.`
+          )
+        } else if (deltaVsHistoricalPct < 0) {
+          recommendations.push(
+            `${periodPrefix} se encuentra ${formatDeltaPct(deltaVsHistoricalPct)} por debajo del promedio mensual histórico, evidenciando mejora frente al histórico.`
+          )
         } else {
-          recommendations.push(`En los meses evaluados, el impacto promedio mensual se mantiene ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio anual, sin una desviación crítica.`)
+          recommendations.push(
+            `${periodPrefix} se mantiene ${formatDeltaPct(deltaVsHistoricalPct)} por encima del promedio mensual histórico, sin una desviación crítica.`
+          )
         }
       }
     }

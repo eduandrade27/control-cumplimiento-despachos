@@ -804,11 +804,15 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
 
 
   const selectedMonthProjection = useMemo<CausesMonthProjection | null>(() => {
-    if (effectiveSelectedMonths.length !== 1) {
+    if (effectiveSelectedMonths.length === 0) {
       return null
     }
 
-    const monthKey = effectiveSelectedMonths[0]
+    const monthKey = [...effectiveSelectedMonths].sort().at(-1)
+
+    if (!monthKey) {
+      return null
+    }
     const programmableDates = getProgrammableDateKeys(monthKey)
 
     if (programmableDates.length === 0) {
