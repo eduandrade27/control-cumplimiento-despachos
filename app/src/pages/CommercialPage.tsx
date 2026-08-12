@@ -101,6 +101,11 @@ export function CommercialPage() {
   const hasAnyFilters = hasActiveFilters || selectedClients.length > 0
   const visibleCauseRows = showAllCauses ? causeTableRows : causeTableRows.slice(0, 10)
   const filteredCommercialRows = useMemo(() => {
+    if (selectedVendor) {
+      const vendorKey = normalizeSearchText(selectedVendor)
+      return commercialDetailRows.filter((row) => normalizeSearchText(row.vendedor) === vendorKey)
+    }
+
     if (!selectedCause) {
       return commercialDetailRows
     }
@@ -121,7 +126,7 @@ export function CommercialPage() {
         }
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)
-  }, [commercialDetailRows, selectedCause])
+  }, [commercialDetailRows, selectedCause, selectedVendor])
 
   const visibleCommercialRows = showAllClients ? filteredCommercialRows : filteredCommercialRows.slice(0, 10)
 
@@ -337,6 +342,7 @@ export function CommercialPage() {
                         key={row.causa}
                         className={isSelected ? 'commercial-page__detail-row is-expanded' : ''}
                         onClick={() => {
+                          setSelectedVendor(null)
                           setSelectedCause((current) => {
                             if (current !== null && normalizeSearchText(current) === normalizeSearchText(row.causa)) {
                               return null
@@ -352,6 +358,7 @@ export function CommercialPage() {
                         onKeyDown={(event) => {
                           if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault()
+                            setSelectedVendor(null)
                             setSelectedCause((current) => {
                               if (current !== null && normalizeSearchText(current) === normalizeSearchText(row.causa)) {
                                 return null
@@ -444,6 +451,7 @@ export function CommercialPage() {
                             <td
                               className="commercial-page__table-cell-left"
                               onClick={() => {
+                                setSelectedCause(null)
                                 setSelectedVendor((current) => {
                                   if (current !== null && normalizeSearchText(current) === normalizeSearchText(row.vendedor)) {
                                     return null
@@ -457,6 +465,7 @@ export function CommercialPage() {
                               onKeyDown={(event) => {
                                 if (event.key === 'Enter' || event.key === ' ') {
                                   event.preventDefault()
+                                  setSelectedCause(null)
                                   setSelectedVendor((current) => {
                                     if (current !== null && normalizeSearchText(current) === normalizeSearchText(row.vendedor)) {
                                       return null
