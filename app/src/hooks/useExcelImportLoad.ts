@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { invalidateConsultaPedidosCache } from './useConsultaPedidos'
 import { dispatchSupabaseRefresh } from '../lib/refreshEvents'
 import { invalidateCommercialDashboardCache } from '../services/commercialService'
 import { getSharedCauseCatalogStorageKey, loadSharedCauseCatalogSummary, saveSharedCauseCatalogSummary } from '../services/causeCatalogService'
@@ -84,6 +85,7 @@ export function useExcelImportLoad(): UseExcelImportLoadResult {
         invalidateOperationalBaseDataCache()
         invalidateCommercialDashboardCache()
         invalidateHistoricDashboardCache()
+        invalidateConsultaPedidosCache()
         const persistedCompleteRulesCount = metadata.causeCatalogSummary.rows.filter((row) => {
           return row.motivoOriginal.trim().length > 0 && row.motivoNormalizado.trim().length > 0
         }).length

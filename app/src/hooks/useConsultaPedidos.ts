@@ -151,6 +151,14 @@ async function loadConsultaPedidosData(): Promise<ConsultaLoadedData> {
   return consultaLoadedDataPromise
 }
 
+export async function preloadConsultaPedidos(): Promise<void> {
+  await loadConsultaPedidosData()
+}
+
+export function invalidateConsultaPedidosCache(): void {
+  consultaLoadedDataPromise = null
+}
+
 function getDaysInMonth(year: number | null, monthKey: string | undefined): number {
   if (year === null || !monthKey) {
     return 0

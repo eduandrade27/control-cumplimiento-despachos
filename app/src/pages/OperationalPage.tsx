@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { GlobalMonthFilter, GlobalYearFilter } from '../components/GlobalPeriodFilters'
 import { KpiCard } from '../components/operational/KpiCard'
 import { OperationalCharts } from '../components/operational/OperationalCharts'
+import { preloadConsultaPedidos } from '../hooks/useConsultaPedidos'
 import { useOperationalDashboard } from '../hooks/useOperationalDashboard'
 import { useOperationalInsights } from '../hooks/useOperationalInsights'
 import { formatNumber, formatPercent } from '../lib/operationalFormat'
@@ -61,6 +62,16 @@ export function OperationalPage() {
     resetCrossFilters,
     hasCrossFilters,
   } = useOperationalInsights(selectedMonths, selectedClients)
+
+  useEffect(() => {
+    if (status !== 'success') {
+      return
+    }
+
+    void preloadConsultaPedidos().catch(() => {
+      // La precarga no debe afectar el funcionamiento de Operativo.
+    })
+  }, [status])
 
   const matchingClients = useMemo(() => {
     const normalizedQuery = normalizeSearchText(clientQuery)
