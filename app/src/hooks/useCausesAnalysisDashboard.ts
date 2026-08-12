@@ -375,10 +375,11 @@ function aggregateRowsByCause(
     }
 
     const dedupeKey = `${pedidoKey}|${normalizedCause}`
-    if (dedupeByPedidoCause.has(dedupeKey)) {
-      continue
+    const isFirstPedidoCause = !dedupeByPedidoCause.has(dedupeKey)
+
+    if (isFirstPedidoCause) {
+      dedupeByPedidoCause.add(dedupeKey)
     }
-    dedupeByPedidoCause.add(dedupeKey)
 
     const fallbackArea = readAreaName(row)?.trim() || 'Sin área'
     const classification = classifyCause(causeRaw, causeCatalogMap, fallbackArea)
@@ -400,8 +401,11 @@ function aggregateRowsByCause(
       matchedCauseTokens.add(normalizedCause)
     }
 
-    existing.pedidos += 1
-    existing.tmPendiente += pendingTmByPedido.get(pedidoKey) ?? 0
+    if (isFirstPedidoCause) {
+      existing.pedidos += 1
+    }
+
+    existing.tmPendiente += readPendingTm(row)
 
     if (!existing.justificacion && classification.justificacion) {
       existing.justificacion = classification.justificacion
@@ -689,9 +693,34 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
   const criticalVisibleRows = useMemo(() => getCriticalCauseRows(buildParetoRows(visibleRows)), [visibleRows])
 
   const tmPendientesTotales = useMemo(() => {
-    const pedidos = aggregatePedidos(filteredDetailRowsByMainFilters)
-    return pedidos.reduce((sum, pedido) => sum + pedido.pendingTm, 0)
-  }, [filteredDetailRowsByMainFilters])
+    if (effectiveMode === 'BRUTO') {
+      const pedidos = aggregatePedidos(filteredDetailRowsByMainFilters)
+      return pedidos.reduce((sum, pedido) => sum + pedido.pendingTm, 0)
+    }
+
+    return filteredRowsByMainFilters.reduce((sum, row) => {
+      if (!isIncumplidoRow(row)) {
+        return sum
+      }
+
+      const causeRaw = readCauseValue(row)
+      if (!causeRaw) {
+        return sum
+      }
+
+      const fallbackArea = readAreaName(row)?.trim() || 'Sin área'
+      const classification = classifyCause(causeRaw, causeCatalogMap, fallbackArea)
+
+      return classification.classification === 'SI'
+        ? sum + readPendingTm(row)
+        : sum
+    }, 0)
+  }, [
+    causeCatalogMap,
+    effectiveMode,
+    filteredDetailRowsByMainFilters,
+    filteredRowsByMainFilters,
+  ])
 
   const impactoTotalTm = useMemo(() => {
     const criticalCauseKeys = new Set(
@@ -704,37 +733,24 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
       return 0
     }
 
-    const pendingTmByPedido = new Map<string, number>(
-      aggregatePedidos(filteredDetailRowsByMainFilters).map((pedido) => [pedido.key, pedido.pendingTm] as const),
-    )
-
-    const coveredPedidoKeys = new Set<string>()
-
-    for (const row of filteredRowsByMainFilters) {
+    return filteredRowsByMainFilters.reduce((sum, row) => {
       if (!isIncumplidoRow(row)) {
-        continue
-      }
-
-      const pedidoKey = buildPedidoKey(row)
-      if (!pedidoKey || !pendingTmByPedido.has(pedidoKey)) {
-        continue
+        return sum
       }
 
       const causeRaw = readCauseValue(row)
       if (!causeRaw) {
-        continue
+        return sum
       }
 
       const causeKey = getCauseIdentity(causeRaw)
       if (!causeKey || !criticalCauseKeys.has(causeKey)) {
-        continue
+        return sum
       }
 
-      coveredPedidoKeys.add(pedidoKey)
-    }
-
-    return Array.from(coveredPedidoKeys).reduce((sum, pedidoKey) => sum + (pendingTmByPedido.get(pedidoKey) ?? 0), 0)
-  }, [criticalVisibleRows, filteredDetailRowsByMainFilters, filteredRowsByMainFilters])
+      return sum + readPendingTm(row)
+    }, 0)
+  }, [criticalVisibleRows, filteredRowsByMainFilters])
 
   const yearSnapshots = useMemo<CausesYearSnapshot[]>(() => {
     if (selectedYear === null) {

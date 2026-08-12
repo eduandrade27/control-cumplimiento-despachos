@@ -65,21 +65,6 @@ function formatPercent(value: number | null, digits = 1): string {
   return `${value.toFixed(digits)}%`
 }
 
-function computeMedian(values: number[]): number {
-  if (values.length === 0) {
-    return 0
-  }
-
-  const sorted = [...values].sort((left, right) => left - right)
-  const middle = Math.floor(sorted.length / 2)
-
-  if (sorted.length % 2 === 0) {
-    return (sorted[middle - 1] + sorted[middle]) / 2
-  }
-
-  return sorted[middle] ?? 0
-}
-
 function buildParetoRows(rows: CauseOperationalRow[]): ParetoRow[] {
   const sorted = [...rows].sort((left, right) => {
     return right.tmPendiente - left.tmPendiente || right.pedidos - left.pedidos
@@ -348,15 +333,6 @@ function splitLabelInTwoLines(label: string, maxFirstLineChars = 34): [string, s
   return [label.slice(0, splitAt), label.slice(splitAt + 1)]
 }
 
-function formatMatrixTooltip(row: CauseOperationalRow): string {
-  return [
-    `Causa: ${row.causa}`,
-    `Pedidos: ${formatNumber(row.pedidos)}`,
-    `TM pendientes: ${formatNumber(row.tmPendiente, 2)}`,
-    `Área: ${row.area || 'Sin área'}`,
-  ].join('\n')
-}
-
 function ParetoChart({
   rows,
   selectedCause,
@@ -462,78 +438,6 @@ function ParetoChart({
       <p className="causes-analysis__pareto-legend">
         Barras = TM pendientes por causa
       </p>
-    </div>
-  )
-}
-
-function PrioritizationMatrix({
-  rows,
-  selectedCause,
-  onSelectCause,
-}: {
-  rows: CauseOperationalRow[]
-  selectedCause: string | null
-  onSelectCause: (cause: string) => void
-}) {
-  if (rows.length === 0) {
-    return <div className="operational-page__state operational-page__state--empty" role="status">No existen causas ajustadas para construir la matriz.</div>
-  }
-
-  const width = 860
-  const height = 360
-  const padding = { top: 28, right: 26, bottom: 52, left: 58 }
-  const chartWidth = width - padding.left - padding.right
-  const chartHeight = height - padding.top - padding.bottom
-  const medianPedidos = computeMedian(rows.map((row) => row.pedidos))
-  const medianTm = computeMedian(rows.map((row) => row.tmPendiente))
-  const maxPedidos = Math.max(1, ...rows.map((row) => row.pedidos))
-  const maxTm = Math.max(1, ...rows.map((row) => row.tmPendiente))
-
-  const xScale = (value: number) => padding.left + (value / maxPedidos) * chartWidth
-  const yScale = (value: number) => padding.top + chartHeight - (value / maxTm) * chartHeight
-  const medianX = xScale(medianPedidos)
-  const medianY = yScale(medianTm)
-
-  return (
-    <div className="causes-analysis__matrix-shell">
-      <svg className="causes-analysis__matrix-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Matriz de priorización">
-        <rect x={padding.left} y={padding.top} width={chartWidth} height={chartHeight} className="causes-analysis__matrix-bg" />
-        <line x1={padding.left} y1={yScale(0)} x2={padding.left + chartWidth} y2={yScale(0)} className="operational-chart__axis" />
-        <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + chartHeight} className="operational-chart__axis" />
-
-        <line x1={medianX} y1={padding.top} x2={medianX} y2={padding.top + chartHeight} className="causes-analysis__matrix-median" />
-        <line x1={padding.left} y1={medianY} x2={padding.left + chartWidth} y2={medianY} className="causes-analysis__matrix-median" />
-
-        <text x={padding.left + 8} y={padding.top + 16} className="causes-analysis__matrix-quadrant">Alto impacto / Baja frecuencia</text>
-        <text x={medianX + 8} y={padding.top + 16} className="causes-analysis__matrix-quadrant">Alto impacto / Alta frecuencia</text>
-        <text x={padding.left + 8} y={padding.top + chartHeight - 8} className="causes-analysis__matrix-quadrant">Bajo impacto / Baja frecuencia</text>
-        <text x={medianX + 8} y={padding.top + chartHeight - 8} className="causes-analysis__matrix-quadrant">Bajo impacto / Alta frecuencia</text>
-
-        {rows.map((row) => {
-          const isSelected = selectedCause === row.causa
-          const x = xScale(row.pedidos)
-          const y = yScale(row.tmPendiente)
-
-          return (
-            <g key={`${row.causa}-${row.area}`}>
-              <Tooltip content={formatMatrixTooltip(row)}>
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={isSelected ? 8 : 6}
-                  className={`causes-analysis__matrix-point ${isSelected ? 'is-selected' : ''}`}
-                  onClick={() => onSelectCause(row.causa)}
-                />
-              </Tooltip>
-            </g>
-          )
-        })}
-
-        <text x={padding.left + chartWidth / 2} y={height - 12} textAnchor="middle" className="operational-chart__y-label">Frecuencia (Pedidos)</text>
-        <text x={14} y={padding.top + chartHeight / 2} transform={`rotate(-90, 14, ${padding.top + chartHeight / 2})`} textAnchor="middle" className="operational-chart__y-label">
-          Impacto (TM pendientes)
-        </text>
-      </svg>
     </div>
   )
 }
@@ -683,12 +587,7 @@ export function CausesAnalysisPage() {
     [criticalTableRows, secondaryTableRows, showSecondaryCauses],
   )
 
-  const matrixMedians = useMemo(() => ({
-    pedidos: computeMedian(rows.map((row) => row.pedidos)),
-    tm: computeMedian(rows.map((row) => row.tmPendiente)),
-  }), [rows])
-
-  const topSummary = useMemo(() => {
+const topSummary = useMemo(() => {
     const totalTm = rows.reduce((sum, row) => sum + row.tmPendiente, 0)
     const topTm = criticalParetoRows.reduce((sum, row) => sum + row.tmPendiente, 0)
 
@@ -707,6 +606,12 @@ export function CausesAnalysisPage() {
     pedidosComprometidos: hasNoRows ? null : pedidosIncumplidos,
     tmComprometidas: hasNoRows ? null : impactoTotalTm,
   }
+
+  console.log('[Análisis Causas] impacto total', {
+    indicatorMode,
+    impactoTotalTm: kpiValues.tmComprometidas,
+    tmPendientesTotales,
+  })
 
   const impactoTotalPct = useMemo(() => {
     if (kpiValues.tmComprometidas === null || tmPendientesTotales <= 0) {
@@ -1499,55 +1404,6 @@ export function CausesAnalysisPage() {
                   </div>
                 )}
               </section>
-
-              {indicatorMode === 'AJUSTADO' && (
-                <section className="operational-card operational-card--table">
-                  <header className="operational-card__header">
-                    <div>
-                      <h3>Matriz de priorización</h3>
-                      <p>
-                        Corte automático por medianas visibles.
-                        {' '}
-                        Frecuencia: <strong>{formatNumber(matrixMedians.pedidos)}</strong>
-                        {' · '}
-                        Impacto: <strong>{formatNumber(matrixMedians.tm, 2)} TM</strong>
-                      </p>
-                    </div>
-                  </header>
-
-                  <PrioritizationMatrix rows={rows} selectedCause={selectedCause} onSelectCause={setSelectedCause} />
-                </section>
-              )}
-
-              {indicatorMode === 'AJUSTADO' && (
-                <section className="operational-card">
-                  <header className="operational-card__header">
-                    <div>
-                      <h3>Causas excluidas del indicador</h3>
-                      <p>Causas con AFECTA AL INDICADOR = NO. Se muestra como referencia informativa.</p>
-                    </div>
-                  </header>
-
-                  {excludedSummary.byCause.length === 0 ? (
-                    <p className="causes-analysis__excluded-empty">No hay causas excluidas para los filtros seleccionados.</p>
-                  ) : (
-                    <div className="causes-analysis__excluded-summary">
-                      <p className="causes-analysis__excluded-total">
-                        Pedidos excluidos del indicador: <strong>{formatNumber(excludedSummary.totalExcludedOrders)}</strong>
-                      </p>
-                      <p className="causes-analysis__excluded-label">Por causa:</p>
-                      <ul className="causes-analysis__excluded-list">
-                        {excludedSummary.byCause.map((item) => (
-                          <li key={`excluded-${item.causa}`}>
-                            <span>{item.causa}</span>
-                            <strong>{formatNumber(item.pedidos)} pedidos</strong>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </section>
-              )}
 
               <section className="operational-card">
                 <header className="operational-card__header">
