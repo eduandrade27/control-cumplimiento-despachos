@@ -5,6 +5,7 @@ import { OperationalCharts } from '../components/operational/OperationalCharts'
 import { preloadConsultaPedidos } from '../hooks/useConsultaPedidos'
 import { useOperationalDashboard } from '../hooks/useOperationalDashboard'
 import { useOperationalInsights } from '../hooks/useOperationalInsights'
+import { preloadHistoricCurrentYear } from '../services/historicService'
 import { formatNumber, formatPercent } from '../lib/operationalFormat'
 import { exportOperationalPdf } from '../lib/operationalPdfExport'
 
@@ -68,9 +69,12 @@ export function OperationalPage() {
       return
     }
 
-    void preloadConsultaPedidos().catch(() => {
-      // La precarga no debe afectar el funcionamiento de Operativo.
-    })
+    void preloadConsultaPedidos()
+      .catch(() => undefined)
+      .then(() => preloadHistoricCurrentYear())
+      .catch(() => {
+        // Las precargas no deben afectar el funcionamiento de Operativo.
+      })
   }, [status])
 
   const matchingClients = useMemo(() => {

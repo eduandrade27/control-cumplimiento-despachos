@@ -97,6 +97,19 @@ function getRangeCacheKey(range?: { from?: string; to?: string }): string {
   return `${from}|${to}`
 }
 
+export async function preloadHistoricCurrentYear(): Promise<void> {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+  const monthText = String(month).padStart(2, '0')
+  const lastDay = new Date(year, month, 0).getDate()
+
+  await fetchHistoricDashboardRows({
+    from: `${year}-01-01`,
+    to: `${year}-${monthText}-${String(lastDay).padStart(2, '0')}`,
+  })
+}
+
 export function fetchHistoricDashboardRows(range?: { from?: string; to?: string }): Promise<HistoricDashboardRow[]> {
   const cacheKey = getRangeCacheKey(range)
   const cached = historicDashboardRowsPromises.get(cacheKey)
