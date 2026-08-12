@@ -1346,7 +1346,7 @@ export function CausesAnalysisPage() {
             <article className="kpi-card causes-analysis__severity-card">
               <div className="causes-analysis__severity-title-row">
                 <span className="kpi-card__title">Índice de severidad</span>
-                <Tooltip content="Mide la gravedad de una causa según su impacto en las TM incumplidas.">
+                <Tooltip content="Impacto de la causa respecto al total de TM incumplidas.">
                   <button
                     type="button"
                     className="historic-page__info-icon causes-analysis__severity-info"
