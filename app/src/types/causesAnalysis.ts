@@ -51,6 +51,21 @@ export interface CausesAdjustedModeInfo {
   message: string
 }
 
+export type CausesMonthProjectionStatus =
+  | 'IN_PROGRESS'
+  | 'PENDING_CLOSE'
+  | 'CLOSED'
+
+export interface CausesMonthProjection {
+  monthKey: string
+  status: CausesMonthProjectionStatus
+  observedImpactTm: number
+  projectedImpactTm: number | null
+  evaluatedProgrammableDays: number
+  totalProgrammableDays: number
+}
+
+
 export interface CausesAnalysisSummary {
   pedidosIncumplidos: number
   tmPendientes: number
@@ -67,6 +82,7 @@ export interface CausesAnalysisSummary {
   rows: CauseOperationalRow[]
   yearSnapshots: CausesYearSnapshot[]
   historicalMonthSnapshots: CausesHistoricalMonthSnapshot[]
+  selectedMonthProjection: CausesMonthProjection | null
   excludedRows: CauseOperationalRow[]
   hasActiveFilters: boolean
 }

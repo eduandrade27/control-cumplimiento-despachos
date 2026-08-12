@@ -566,6 +566,7 @@ export function CausesAnalysisPage() {
     rows,
     yearSnapshots,
     historicalMonthSnapshots,
+    selectedMonthProjection,
     excludedRows,
     hasActiveFilters,
     changeYear,
@@ -845,10 +846,6 @@ export function CausesAnalysisPage() {
     const sortedSnapshots = [...snapshotsWithData].sort((left, right) => left.monthKey.localeCompare(right.monthKey))
     const selectedMonthSet = new Set(selectedMonths)
     const selectedPeriodSnapshots = sortedSnapshots.filter((snapshot) => selectedMonthSet.has(snapshot.monthKey))
-    const yearMonthlyImpacts = sortedSnapshots.map((snapshot) => getImpactTm(snapshot.rows))
-    const annualMonthlyAverage = yearMonthlyImpacts.length > 0
-      ? yearMonthlyImpacts.reduce((sum, value) => sum + value, 0) / yearMonthlyImpacts.length
-      : 0
 
     if (principalCause && snapshotsWithData.length > 0) {
       const principalCauseKey = normalizeSearchText(principalCause.causa)
@@ -871,6 +868,11 @@ export function CausesAnalysisPage() {
       const isFullYearSelection = selectedPeriodSnapshots.length === sortedSnapshots.length
 
       if (isFullYearSelection) {
+        const yearMonthlyImpacts = sortedSnapshots.map((snapshot) => getImpactTm(snapshot.rows))
+        const annualMonthlyAverage = yearMonthlyImpacts.length > 0
+          ? yearMonthlyImpacts.reduce((sum, value) => sum + value, 0) / yearMonthlyImpacts.length
+          : 0
+
         if (annualMonthlyAverage > 0) {
           const monthsAboveAverage = yearMonthlyImpacts.filter((impact) => impact > annualMonthlyAverage).length
           recommendations.push(`En el comportamiento anual, ${monthsAboveAverage} de los ${sortedSnapshots.length} meses quedaron por encima del promedio mensual. Resulta recomendable revisar esos meses para intervenir las causas de mayor desvío.`)
@@ -880,9 +882,62 @@ export function CausesAnalysisPage() {
         const selectedIndex = sortedSnapshots.findIndex((snapshot) => snapshot.monthKey === selectedSnapshot.monthKey)
         const previousSnapshot = selectedIndex > 0 ? sortedSnapshots[selectedIndex - 1] : null
 
-        if (previousSnapshot && annualMonthlyAverage > 0) {
-          const currentImpact = getImpactTm(selectedSnapshot.rows)
-          const previousImpact = getImpactTm(previousSnapshot.rows)
+        // La referencia histórica excluye el propio mes analizado.
+        const referenceSnapshots = sortedSnapshots.filter(
+          (snapshot) => snapshot.monthKey !== selectedSnapshot.monthKey,
+        )
+        const referenceImpacts = referenceSnapshots.map((snapshot) => getImpactTm(snapshot.rows))
+        const annualMonthlyAverage = referenceImpacts.length > 0
+          ? referenceImpacts.reduce((sum, value) => sum + value, 0) / referenceImpacts.length
+          : 0
+
+        const currentImpact = getImpactTm(selectedSnapshot.rows)
+        const previousImpact = previousSnapshot ? getImpactTm(previousSnapshot.rows) : 0
+
+        const projectionApplies =
+          selectedMonthProjection?.monthKey === selectedSnapshot.monthKey
+
+        if (
+          projectionApplies
+          && selectedMonthProjection.status === 'IN_PROGRESS'
+          && selectedMonthProjection.projectedImpactTm !== null
+        ) {
+          const projectedImpact = selectedMonthProjection.projectedImpactTm
+          const deltaVsAnnualPct = annualMonthlyAverage > 0
+            ? ((projectedImpact - annualMonthlyAverage) / annualMonthlyAverage) * 100
+            : null
+          const deltaVsPreviousPct = previousImpact > 0
+            ? ((projectedImpact - previousImpact) / previousImpact) * 100
+            : null
+
+          if (deltaVsAnnualPct !== null) {
+            if (deltaVsAnnualPct > 10) {
+              recommendations.push(
+                `El impacto observado acumula ${formatNumber(currentImpact, 2)} TM. Con ${selectedMonthProjection.evaluatedProgrammableDays} de ${selectedMonthProjection.totalProgrammableDays} días programables evaluados, el cierre se proyecta en ${formatNumber(projectedImpact, 2)} TM, ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio mensual histórico. Conviene priorizar acciones sobre las causas de mayor impacto para contener el cierre del mes.`,
+              )
+            } else if (deltaVsAnnualPct < 0) {
+              recommendations.push(
+                `El impacto acumulado es ${formatNumber(currentImpact, 2)} TM. Considerando el ritmo observado a la fecha, el cierre se proyecta en ${formatNumber(projectedImpact, 2)} TM, ${formatDeltaPct(deltaVsAnnualPct)} por debajo del promedio mensual histórico. De mantenerse este ritmo, el cierre sería favorable frente al comportamiento histórico.`,
+              )
+            } else {
+              recommendations.push(
+                `El impacto observado acumula ${formatNumber(currentImpact, 2)} TM. Con ${selectedMonthProjection.evaluatedProgrammableDays} de ${selectedMonthProjection.totalProgrammableDays} días programables evaluados, el cierre se proyecta en ${formatNumber(projectedImpact, 2)} TM, ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio mensual histórico. Conviene mantener seguimiento cercano durante el resto del mes.`,
+              )
+            }
+          } else if (deltaVsPreviousPct !== null) {
+            recommendations.push(
+              `El impacto observado acumula ${formatNumber(currentImpact, 2)} TM. Con ${selectedMonthProjection.evaluatedProgrammableDays} de ${selectedMonthProjection.totalProgrammableDays} días programables evaluados, el cierre se proyecta en ${formatNumber(projectedImpact, 2)} TM, ${formatDeltaPct(deltaVsPreviousPct)} ${deltaVsPreviousPct >= 0 ? 'por encima' : 'por debajo'} del mes anterior.`,
+            )
+          }
+        } else if (
+          projectionApplies
+          && selectedMonthProjection.status === 'PENDING_CLOSE'
+        ) {
+          recommendations.push(
+            `El período alcanzó su último día programable, pero mantiene programación pendiente de evaluación. El impacto observado es ${formatNumber(currentImpact, 2)} TM; no corresponde proyectar el cierre hasta completar la evaluación pendiente.`,
+          )
+        } else if (annualMonthlyAverage > 0) {
+          // Mes cerrado: usa el resultado real completo, incluidos días excepcionales/feriados.
           const deltaVsAnnualPct = ((currentImpact - annualMonthlyAverage) / annualMonthlyAverage) * 100
           const deltaVsPreviousPct = previousImpact > 0
             ? ((currentImpact - previousImpact) / previousImpact) * 100
@@ -890,34 +945,36 @@ export function CausesAnalysisPage() {
 
           if (currentImpact > annualMonthlyAverage * 1.1 || currentImpact > previousImpact * 1.05) {
             if (deltaVsAnnualPct >= 0) {
-              recommendations.push(`El impacto observado se ubica ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio mensual anual. Conviene ejecutar un plan de acción inmediato.`)
+              recommendations.push(`El impacto observado se ubica ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio mensual histórico. Conviene ejecutar un plan de acción inmediato.`)
             } else if (deltaVsPreviousPct !== null && deltaVsPreviousPct > 0) {
               recommendations.push(`El impacto observado se ubica ${formatDeltaPct(deltaVsPreviousPct)} por encima del mes anterior. Será conveniente activar un plan de acción inmediato.`)
             }
+          } else if (deltaVsAnnualPct <= 0) {
+            recommendations.push(`El impacto observado se encuentra ${formatDeltaPct(deltaVsAnnualPct)} por debajo del promedio mensual histórico, evidenciando una mejora frente al comportamiento histórico.`)
           } else {
-            if (deltaVsAnnualPct <= 0) {
-              recommendations.push(`El impacto observado se encuentra ${formatDeltaPct(deltaVsAnnualPct)} por debajo del promedio mensual anual, evidenciando una mejora frente al comportamiento histórico.`)
-            } else {
-              recommendations.push(`El impacto observado se mantiene ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio mensual anual. El seguimiento debería enfocarse en sostener control cercano.`)
-            }
+            recommendations.push(`El impacto observado se mantiene ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio mensual histórico. El seguimiento debería enfocarse en sostener control cercano.`)
           }
         }
       } else if (!isFullYearSelection && selectedPeriodSnapshots.length >= 2) {
         const selectedMonthlyAverage = selectedPeriodSnapshots
           .map((snapshot) => getImpactTm(snapshot.rows))
           .reduce((sum, value) => sum + value, 0) / selectedPeriodSnapshots.length
+
+        const yearMonthlyImpacts = sortedSnapshots.map((snapshot) => getImpactTm(snapshot.rows))
+        const annualMonthlyAverage = yearMonthlyImpacts.length > 0
+          ? yearMonthlyImpacts.reduce((sum, value) => sum + value, 0) / yearMonthlyImpacts.length
+          : 0
+
         const deltaVsAnnualPct = annualMonthlyAverage > 0
           ? ((selectedMonthlyAverage - annualMonthlyAverage) / annualMonthlyAverage) * 100
           : 0
 
         if (annualMonthlyAverage > 0 && selectedMonthlyAverage > annualMonthlyAverage * 1.1) {
           recommendations.push(`En los meses evaluados, el impacto promedio mensual se ubica ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio anual. Es recomendable priorizar su seguimiento.`)
+        } else if (deltaVsAnnualPct < 0) {
+          recommendations.push(`En los meses evaluados, el impacto promedio mensual se encuentra ${formatDeltaPct(deltaVsAnnualPct)} por debajo del promedio anual, evidenciando mejora frente al histórico.`)
         } else {
-          if (deltaVsAnnualPct < 0) {
-            recommendations.push(`En los meses evaluados, el impacto promedio mensual se encuentra ${formatDeltaPct(deltaVsAnnualPct)} por debajo del promedio anual, evidenciando mejora frente al histórico.`)
-          } else {
-            recommendations.push(`En los meses evaluados, el impacto promedio mensual se mantiene ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio anual, sin una desviación crítica.`)
-          }
+          recommendations.push(`En los meses evaluados, el impacto promedio mensual se mantiene ${formatDeltaPct(deltaVsAnnualPct)} por encima del promedio anual, sin una desviación crítica.`)
         }
       }
     }
@@ -969,7 +1026,18 @@ export function CausesAnalysisPage() {
     }
 
     return recommendations
-  }, [concentrationLevel, criticalCausePct, leadingArea, principalCause, selectedMonths, topSummary.representedPct, topSummary.topCount, topSummary.visibleCauseCount, yearSnapshots])
+  }, [
+    concentrationLevel,
+    criticalCausePct,
+    leadingArea,
+    principalCause,
+    selectedMonthProjection,
+    selectedMonths,
+    topSummary.representedPct,
+    topSummary.topCount,
+    topSummary.visibleCauseCount,
+    yearSnapshots,
+  ])
 
   const excludedSummary = useMemo(() => {
     const totalExcludedOrders = excludedRows.reduce((sum, row) => sum + row.pedidos, 0)

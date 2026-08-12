@@ -3,7 +3,9 @@ import {
   aggregatePedidos,
   buildPedidoKey,
   filterRowsBySelectedMonths,
+  getDateKey,
   isIncumplidoRow,
+  isSeguimientoWithEmptyCause,
   normalizeText,
   readAreaName,
   readCauseName,
@@ -25,6 +27,7 @@ import type {
   CausesAnalysisHookResult,
   CausesAdjustedModeInfo,
   CausesIndicatorMode,
+  CausesMonthProjection,
   CausesYearSnapshot,
   CausesHistoricalMonthSnapshot,
   CausesAnalysisStatus,
@@ -48,6 +51,67 @@ function buildMonthKey(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   return `${year}-${month}`
+}
+
+const PERU_NATIONAL_HOLIDAYS_2026 = new Set([
+  '2026-01-01',
+  '2026-04-02',
+  '2026-04-03',
+  '2026-05-01',
+  '2026-06-07',
+  '2026-06-29',
+  '2026-07-23',
+  '2026-07-28',
+  '2026-07-29',
+  '2026-08-06',
+  '2026-08-30',
+  '2026-10-08',
+  '2026-11-01',
+  '2026-12-08',
+  '2026-12-09',
+  '2026-12-25',
+])
+
+function getTodayDateKey(): string {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getProgrammableDateKeys(monthKey: string): string[] {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey)
+
+  if (!match) {
+    return []
+  }
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const lastDay = new Date(year, month, 0).getDate()
+  const result: string[] = []
+
+  for (let day = 1; day <= lastDay; day += 1) {
+    const date = new Date(year, month - 1, day)
+    const dayOfWeek = date.getDay()
+    const dateKey =
+      `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+
+    // Domingo
+    if (dayOfWeek === 0) {
+      continue
+    }
+
+    // Feriado nacional
+    if (PERU_NATIONAL_HOLIDAYS_2026.has(dateKey)) {
+      continue
+    }
+
+    result.push(dateKey)
+  }
+
+  return result
 }
 
 function extractAvailableYears(months: AvailableMonthOption[]): number[] {
@@ -738,6 +802,151 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
     })
   }, [availableMonths, causeCatalogMap, causeRows, effectiveMode, effectiveSector, selectedClientSet])
 
+
+  const selectedMonthProjection = useMemo<CausesMonthProjection | null>(() => {
+    if (effectiveSelectedMonths.length !== 1) {
+      return null
+    }
+
+    const monthKey = effectiveSelectedMonths[0]
+    const programmableDates = getProgrammableDateKeys(monthKey)
+
+    if (programmableDates.length === 0) {
+      return null
+    }
+
+    const monthDetailRows = filterRowsBySelectedMonths(detailRows, [monthKey]).filter((row) => {
+      if (!matchesSector(row, effectiveSector)) {
+        return false
+      }
+
+      if (selectedClientSet.size > 0) {
+        const client = normalizeText(readClientName(row))
+        return client ? selectedClientSet.has(client) : false
+      }
+
+      return true
+    })
+
+    const rowsByDate = new Map<string, DashboardRow[]>()
+
+    for (const row of monthDetailRows) {
+      const dateKey = getDateKey(
+        readTextValue(row, ['fecha', 'fecha_programacion', 'fecha_pedido']),
+      )
+
+      if (!dateKey) {
+        continue
+      }
+
+      const current = rowsByDate.get(dateKey) ?? []
+      current.push(row)
+      rowsByDate.set(dateKey, current)
+    }
+
+    const todayKey = getTodayDateKey()
+    const evaluatedDateKeys = new Set<string>()
+    const pendingEvaluationDateKeys = new Set<string>()
+
+    for (const dateKey of programmableDates) {
+      if (dateKey > todayKey) {
+        continue
+      }
+
+      const dateRows = rowsByDate.get(dateKey)
+
+      // Sin programa registrado: no es una observación.
+      if (!dateRows || dateRows.length === 0) {
+        continue
+      }
+
+      // Opción A:
+      // basta un registro pendiente para excluir el día completo.
+      if (dateRows.some((row) => isSeguimientoWithEmptyCause(row))) {
+        pendingEvaluationDateKeys.add(dateKey)
+        continue
+      }
+
+      evaluatedDateKeys.add(dateKey)
+    }
+
+    // El impacto observado solo utiliza días totalmente evaluados.
+    const evaluableCauseRows = filterRowsBySelectedMonths(causeRows, [monthKey]).filter((row) => {
+      if (!matchesSector(row, effectiveSector)) {
+        return false
+      }
+
+      if (selectedClientSet.size > 0) {
+        const client = normalizeText(readClientName(row))
+        if (!client || !selectedClientSet.has(client)) {
+          return false
+        }
+      }
+
+      const dateKey = getDateKey(
+        readTextValue(row, ['fecha', 'fecha_programacion', 'fecha_pedido']),
+      )
+
+      return dateKey ? evaluatedDateKeys.has(dateKey) : false
+    })
+
+    const evaluatedAggregated = aggregateRowsByCause(
+      evaluableCauseRows,
+      causeCatalogMap,
+    )
+
+    const evaluatedVisibleRows =
+      effectiveMode === 'BRUTO'
+        ? evaluatedAggregated.rows
+        : evaluatedAggregated.rows.filter(
+            (row) => row.catalogClassification === 'SI',
+          )
+
+    const observedImpactTm = evaluatedVisibleRows.reduce(
+      (sum, row) => sum + row.tmPendiente,
+      0,
+    )
+
+    const lastProgrammableDate =
+      programmableDates[programmableDates.length - 1]
+
+    const evaluatedProgrammableDays = evaluatedDateKeys.size
+    const totalProgrammableDays = programmableDates.length
+
+    let status: CausesMonthProjection['status']
+
+    if (todayKey < lastProgrammableDate) {
+      status = 'IN_PROGRESS'
+    } else if (pendingEvaluationDateKeys.size > 0) {
+      status = 'PENDING_CLOSE'
+    } else {
+      status = 'CLOSED'
+    }
+
+    const projectedImpactTm =
+      status === 'IN_PROGRESS' && evaluatedProgrammableDays > 0
+        ? (observedImpactTm / evaluatedProgrammableDays) *
+          totalProgrammableDays
+        : null
+
+    return {
+      monthKey,
+      status,
+      observedImpactTm,
+      projectedImpactTm,
+      evaluatedProgrammableDays,
+      totalProgrammableDays,
+    }
+  }, [
+    causeCatalogMap,
+    causeRows,
+    detailRows,
+    effectiveMode,
+    effectiveSector,
+    effectiveSelectedMonths,
+    selectedClientSet,
+  ])
+
   const availableClients = useMemo(() => buildAvailableClients(filteredRowsByScope), [filteredRowsByScope])
 
   useEffect(() => {
@@ -814,6 +1023,7 @@ export function useCausesAnalysisDashboard(selectedClients: string[]): CausesAna
     rows: visibleRows,
     yearSnapshots,
     historicalMonthSnapshots,
+    selectedMonthProjection,
     excludedRows,
     hasActiveFilters,
     changeYear,
