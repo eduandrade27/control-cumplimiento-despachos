@@ -357,7 +357,7 @@ function buildDetailRows(
     .sort((left, right) => right.tmPendiente - left.tmPendiente)
 }
 
-export function useCommercialDashboard(selectedClients: string[], selectedArea: string | null) {
+export function useCommercialDashboard(selectedClients: string[], selectedArea: string | null, selectedVendor: string | null) {
   const {
     selectedYear,
     setSelectedYear,
@@ -506,8 +506,14 @@ export function useCommercialDashboard(selectedClients: string[], selectedArea: 
     })
   }, [areaRows, filteredCauseRows, selectedArea, selectedClients, selectedMonths])
 
+  const vendorFilteredCauseRows = useMemo(() => {
+    if (!selectedVendor) return areaFilteredCauseRows
+    const key = normalizeText(selectedVendor)
+    return areaFilteredCauseRows.filter((row) => normalizeText(readVendorName(row) ?? '') === key)
+  }, [areaFilteredCauseRows, selectedVendor])
+
   const kpis = useMemo(() => buildCommercialKpis(areaFilteredDetailRows), [areaFilteredDetailRows])
-  const causeTableRows = useMemo(() => buildCauseRows(areaFilteredCauseRows), [areaFilteredCauseRows])
+  const causeTableRows = useMemo(() => buildCauseRows(vendorFilteredCauseRows), [vendorFilteredCauseRows])
   const commercialDetailRows = useMemo(
     () => buildDetailRows(areaFilteredDetailRows, areaFilteredCauseRows),
     [areaFilteredCauseRows, areaFilteredDetailRows],

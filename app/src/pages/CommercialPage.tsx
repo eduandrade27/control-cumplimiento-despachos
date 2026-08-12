@@ -20,6 +20,7 @@ export function CommercialPage() {
   const [showAllClients, setShowAllClients] = useState(false)
   const [selectedArea, setSelectedArea] = useState<string | null>(null)
   const [selectedCause, setSelectedCause] = useState<string | null>(null)
+  const [selectedVendor, setSelectedVendor] = useState<string | null>(null)
 
   const {
     status,
@@ -37,7 +38,7 @@ export function CommercialPage() {
     resetFilters,
     hasActiveFilters,
     availableAreas,
-  } = useCommercialDashboard(selectedClients, selectedArea)
+  } = useCommercialDashboard(selectedClients, selectedArea, selectedVendor)
 
   const matchingClients = useMemo(() => {
     const normalizedQuery = normalizeSearchText(clientQuery)
@@ -84,6 +85,7 @@ export function CommercialPage() {
     setShowAllClients(false)
     setSelectedArea(null)
     setSelectedCause(null)
+    setSelectedVendor(null)
   }
 
   const toggleRowExpansion = (rowKey: string) => {
@@ -309,7 +311,11 @@ export function CommercialPage() {
               <header className="operational-card__header">
                 <div>
                   <h3>Indicador por causas</h3>
-                  <p>Resumen de TM pendiente e incumplimientos por causa.</p>
+                  <p>
+                    {selectedVendor
+                      ? `Filtrado por vendedor: ${selectedVendor}`
+                      : 'Resumen de TM pendiente e incumplimientos por causa.'}
+                  </p>
                 </div>
               </header>
 
@@ -409,10 +415,14 @@ export function CommercialPage() {
                   <tbody>
                     {visibleCommercialRows.map((row) => {
                       const isExpanded = expandedRows.includes(row.key)
+                      const isVendorSelected = selectedVendor !== null && normalizeSearchText(selectedVendor) === normalizeSearchText(row.vendedor)
 
                       return (
                         <Fragment key={row.key}>
-                          <tr className="commercial-page__detail-row">
+                          <tr
+                            className="commercial-page__detail-row"
+                            style={{ backgroundColor: isVendorSelected ? '#e2e8f0' : undefined }}
+                          >
                             <td
                               className="commercial-page__table-cell-expand"
                               onClick={() => toggleRowExpansion(row.key)}
@@ -431,7 +441,36 @@ export function CommercialPage() {
                             <td className="commercial-page__table-cell-left">
                               <span className="commercial-page__table-cell-main">{row.cliente}</span>
                             </td>
-                            <td className="commercial-page__table-cell-left"><span className="commercial-page__table-cell-main">{row.vendedor}</span></td>
+                            <td
+                              className="commercial-page__table-cell-left"
+                              onClick={() => {
+                                setSelectedVendor((current) => {
+                                  if (current !== null && normalizeSearchText(current) === normalizeSearchText(row.vendedor)) {
+                                    return null
+                                  }
+                                  return row.vendedor
+                                })
+                                setShowAllCauses(false)
+                              }}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault()
+                                  setSelectedVendor((current) => {
+                                    if (current !== null && normalizeSearchText(current) === normalizeSearchText(row.vendedor)) {
+                                      return null
+                                    }
+                                    return row.vendedor
+                                  })
+                                  setShowAllCauses(false)
+                                }
+                              }}
+                              aria-label={isVendorSelected ? `Quitar filtro por vendedor ${row.vendedor}` : `Filtrar causas por vendedor ${row.vendedor}`}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              <span className="commercial-page__table-cell-main">{row.vendedor}</span>
+                            </td>
                             <td className="commercial-page__table-cell-center">{formatNumber(row.tmPendiente, 2)}</td>
                           </tr>
                           {isExpanded && (
