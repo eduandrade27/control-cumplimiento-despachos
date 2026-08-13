@@ -1239,7 +1239,7 @@ const topSummary = useMemo(() => {
             </article>
 
             <article className="kpi-card">
-              <span className="kpi-card__title">Impacto total</span>
+              <span className="kpi-card__title">Impacto de causas críticas</span>
               <strong className="kpi-card__value">{formatNumber(kpiValues.tmComprometidas, 2)} TM</strong>
               <span className="kpi-card__hint">
                 {impactoTotalPct === null
