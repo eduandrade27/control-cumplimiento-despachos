@@ -79,23 +79,26 @@ export function useExcelImportLoad(): UseExcelImportLoadResult {
         message: 'Finalizando...',
       }))
 
-      if (outcome.ok && metadata.causeCatalogSummary) {
-        await saveSharedCauseCatalogSummary(metadata.causeCatalogSummary)
+      if (outcome.ok) {
         clearSupabaseRowsCache()
         invalidateOperationalBaseDataCache()
         invalidateCommercialDashboardCache()
         invalidateHistoricDashboardCache()
         invalidateConsultaPedidosCache()
-        const persistedCompleteRulesCount = metadata.causeCatalogSummary.rows.filter((row) => {
-          return row.motivoOriginal.trim().length > 0 && row.motivoNormalizado.trim().length > 0
-        }).length
-        const readSummary = await loadSharedCauseCatalogSummary()
 
-        setStorageDiagnostics({
-          storageKey: getSharedCauseCatalogStorageKey(),
-          persistedCompleteRulesCount,
-          analysisReadRulesCount: readSummary?.rows.length ?? 0,
-        })
+        if (metadata.causeCatalogSummary) {
+          await saveSharedCauseCatalogSummary(metadata.causeCatalogSummary)
+          const persistedCompleteRulesCount = metadata.causeCatalogSummary.rows.filter((row) => {
+            return row.motivoOriginal.trim().length > 0 && row.motivoNormalizado.trim().length > 0
+          }).length
+          const readSummary = await loadSharedCauseCatalogSummary()
+
+          setStorageDiagnostics({
+            storageKey: getSharedCauseCatalogStorageKey(),
+            persistedCompleteRulesCount,
+            analysisReadRulesCount: readSummary?.rows.length ?? 0,
+          })
+        }
       }
 
       setResult(outcome)
